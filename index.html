@@ -1,0 +1,2939 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>送水及空桶统计助手 Pro</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- html2canvas for Receipt Image Generation -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f7ff',
+              100: '#e0effe',
+              500: '#0284c7',
+              600: '#0369a1',
+              700: '#075985',
+              800: '#0c4a6e',
+            }
+          },
+          boxShadow: {
+            'card': '0 2px 10px rgba(0, 0, 0, 0.04)',
+            'float': '0 10px 30px -5px rgba(2, 132, 199, 0.25)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      -webkit-tap-highlight-color: transparent;
+      padding-bottom: env(safe-area-inset-bottom);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    .pb-safe {
+      padding-bottom: calc(4.8rem + env(safe-area-inset-bottom));
+    }
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+      -webkit-appearance: none; 
+      margin: 0; 
+    }
+    input[type=number] {
+      -moz-appearance: textfield;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    #signatureCanvas {
+      touch-action: none;
+    }
+
+    /* 打印专用样式 */
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      #printReceiptArea, #printReceiptArea * {
+        visibility: visible;
+      }
+      #printReceiptArea {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        margin: 0;
+        padding: 15px;
+        background: white;
+      }
+      .no-print {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col selection:bg-sky-100 selection:text-sky-900">
+
+  <!-- 顶部状态导航栏 -->
+  <header class="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 no-print">
+    <div class="max-w-md mx-auto px-4 py-2.5 flex items-center justify-between">
+      <div class="flex items-center space-x-2">
+        <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-600 to-cyan-400 flex items-center justify-center shadow-md shadow-sky-500/20 text-white">
+          <i data-lucide="droplets" class="w-4 h-4"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-slate-900 leading-tight text-sm">送水与空桶对账助手</h1>
+          <p class="text-[10px] text-slate-500" id="headerDateDisplay">加载中...</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-1">
+        <button onclick="switchTab('tab-search')" class="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition" title="小票与历史台账检索">
+          <i data-lucide="search" class="w-4 h-4"></i>
+        </button>
+        <button onclick="openExportModal()" class="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition" title="自定义导出Excel">
+          <i data-lucide="download" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主体内容容器 -->
+  <main class="flex-1 max-w-md mx-auto w-full px-3.5 pt-2.5 pb-safe">
+
+    <!-- ==================== TAB 1: 极速记账 (ENTRY) ==================== -->
+    <section id="tab-entry" class="space-y-3">
+      
+      <!-- 日期选择 -->
+      <div class="bg-white rounded-2xl p-3 shadow-card border border-slate-100 flex items-center justify-between">
+        <div class="flex items-center space-x-1.5">
+          <span class="text-xs font-bold text-slate-700">送货日期:</span>
+          <input type="date" id="entryDate" onchange="onDateChange()" class="bg-slate-100 text-slate-800 text-xs font-semibold rounded-lg px-2.5 py-1 border-none focus:ring-2 focus:ring-sky-500 outline-none">
+        </div>
+        <button onclick="setTodayDate()" class="text-[11px] font-medium text-sky-600 hover:text-sky-700 bg-sky-50 px-2.5 py-1 rounded-md transition">
+          回到今天
+        </button>
+      </div>
+
+      <!-- 快速录入卡片 -->
+      <div class="bg-white rounded-2xl p-3.5 shadow-card border border-slate-100 space-y-3">
+        
+        <!-- 步骤1：选择客户 -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-xs font-bold text-slate-700 flex items-center space-x-1">
+              <span class="w-4 h-4 rounded-full bg-sky-500 text-white text-[10px] flex items-center justify-center font-bold">1</span>
+              <span>选择送水客户</span>
+            </label>
+            <button type="button" onclick="openAddCustomerModal()" class="text-xs text-sky-600 hover:text-sky-700 flex items-center space-x-0.5">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+              <span>新客户</span>
+            </button>
+          </div>
+
+          <!-- 常用客户快捷横向滑动胶囊 -->
+          <div class="flex space-x-1.5 overflow-x-auto pb-1 mb-1.5 no-scrollbar" id="quickCustomerChips"></div>
+
+          <!-- 客户下拉选择 -->
+          <div class="relative">
+            <select id="customerSelect" onchange="onCustomerSelectChange()" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-semibold rounded-xl p-2.5 pr-8 focus:ring-2 focus:ring-sky-500 outline-none appearance-none">
+              <option value="">-- 请选择送达客户 --</option>
+            </select>
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+              <i data-lucide="chevron-down" class="w-4 h-4"></i>
+            </div>
+          </div>
+
+          <!-- 客户快捷信息条（负责人/电话/高德导航） -->
+          <div id="customerQuickContactBar" class="mt-2 hidden bg-slate-50 rounded-xl p-2.5 border border-slate-200/80 text-xs flex items-center justify-between shadow-sm">
+            <div class="truncate mr-1">
+              <div class="flex items-center space-x-1 font-bold text-slate-800 truncate">
+                <span id="quickContactName">联系人: --</span>
+                <span id="quickContactPhone" class="text-slate-500 font-normal ml-1">--</span>
+              </div>
+              <p id="quickContactAddress" class="text-[10px] text-slate-400 truncate mt-0.5">地址: --</p>
+            </div>
+            <div class="flex space-x-1 flex-shrink-0">
+              <a id="quickCallLink" href="tel:" class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-[11px] font-bold hover:bg-emerald-100 flex items-center space-x-0.5">
+                <i data-lucide="phone-call" class="w-3 h-3"></i>
+                <span>拨打</span>
+              </a>
+              <a id="quickNaviLink" href="#" target="_blank" class="px-2 py-1 bg-sky-50 text-sky-700 rounded-lg text-[11px] font-bold hover:bg-sky-100 flex items-center space-x-0.5">
+                <i data-lucide="navigation" class="w-3 h-3"></i>
+                <span>高德导航</span>
+              </a>
+            </div>
+          </div>
+
+          <!-- 客户历史欠桶状态提示条 -->
+          <div id="customerDebtAlert" class="mt-2 hidden p-2.5 rounded-xl bg-amber-50 border border-amber-200/70 text-xs text-amber-800 flex items-center justify-between">
+            <div class="flex items-center space-x-1.5">
+              <i data-lucide="alert-circle" class="w-4 h-4 text-amber-600 flex-shrink-0"></i>
+              <span>该客户在押欠 18.9L 空桶: <b id="customerDebtCount" class="text-amber-700 font-bold text-sm">0</b> 个</span>
+            </div>
+            <button onclick="quickSelectReturnOnly()" class="px-2 py-0.5 bg-amber-600 text-white rounded text-[11px] font-medium hover:bg-amber-700 transition">
+              本次收回
+            </button>
+          </div>
+        </div>
+
+        <!-- 步骤2：点选本次送水产品（未选产品不出现） -->
+        <div class="pt-1 border-t border-slate-100 space-y-2">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-bold text-slate-700 flex items-center space-x-1">
+              <span class="w-4 h-4 rounded-full bg-sky-500 text-white text-[10px] flex items-center justify-center font-bold">2</span>
+              <span>点选送货产品（勾选后输入数量）</span>
+            </label>
+            <span class="text-[10px] text-slate-400">支持多选混搭</span>
+          </div>
+
+          <!-- 产品选择器胶囊 (3个核心产品) -->
+          <div class="grid grid-cols-3 gap-1.5">
+            <button type="button" id="btnToggle189" onclick="toggleProductSelect('189')" class="p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 flex flex-col items-center justify-center transition active:scale-95 text-center">
+              <span class="text-xs font-bold block" id="titleToggle189">🪣 18.9L大桶</span>
+              <span class="text-[9px] text-slate-400 mt-0.5">循环回收桶</span>
+            </button>
+
+            <button type="button" id="btnToggle10L" onclick="toggleProductSelect('10L')" class="p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 flex flex-col items-center justify-center transition active:scale-95 text-center">
+              <span class="text-xs font-bold block" id="titleToggle10L">🫗 10L大桶</span>
+              <span class="text-[9px] text-slate-400 mt-0.5">一次性包装</span>
+            </button>
+
+            <button type="button" id="btnToggle369" onclick="toggleProductSelect('369')" class="p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 flex flex-col items-center justify-center transition active:scale-95 text-center">
+              <span class="text-xs font-bold block" id="titleToggle369">🍾 369ml小瓶</span>
+              <span class="text-[9px] text-slate-400 mt-0.5">24瓶/件 (箱/包)</span>
+            </button>
+          </div>
+
+          <!-- 未选任何产品时的空状态提示 -->
+          <div id="noProductSelectedTip" class="bg-slate-50/80 rounded-xl p-3.5 text-center border border-dashed border-slate-200 text-slate-400 text-xs">
+            👆 请点击上方按钮，选择本次送达的产品
+          </div>
+
+          <!-- 18.9L 大桶水数量输入区（仅在选中时显示） -->
+          <div id="cardProduct189" class="hidden bg-sky-50/70 rounded-xl p-2.5 border border-sky-200 space-y-1.5 transition-all">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-2">
+                <span class="w-6 h-6 rounded-lg bg-sky-500 text-white flex items-center justify-center text-[10px] font-bold">18.9</span>
+                <div>
+                  <span class="text-xs font-bold text-slate-800">18.9L 大桶水</span>
+                  <span class="text-[9px] text-sky-600 block leading-none">可循环回收桶</span>
+                </div>
+              </div>
+              <div class="flex items-center space-x-1.5">
+                <button type="button" onclick="stepQty('qty189', -1)" class="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-600 flex items-center justify-center active:scale-95 text-base font-bold">-</button>
+                <input type="number" id="qty189" value="10" min="0" oninput="on189QtyChange()" class="w-12 text-center font-bold text-slate-900 bg-white border border-slate-200 rounded-lg py-0.5 text-sm focus:ring-2 focus:ring-sky-500 outline-none">
+                <button type="button" onclick="stepQty('qty189', 1)" class="w-7 h-7 rounded-lg bg-sky-600 text-white flex items-center justify-center active:scale-95 text-base font-bold">+</button>
+              </div>
+            </div>
+            <div class="flex space-x-1 justify-end">
+              <button type="button" onclick="addQty('qty189', 5)" class="text-[10px] bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-50">+5</button>
+              <button type="button" onclick="addQty('qty189', 10)" class="text-[10px] bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-50">+10</button>
+              <button type="button" onclick="addQty('qty189', 20)" class="text-[10px] bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-50">+20</button>
+              <button type="button" onclick="setQty('qty189', 0)" class="text-[10px] bg-slate-200/70 text-slate-500 px-1.5 py-0.5 rounded">清零</button>
+            </div>
+          </div>
+
+          <!-- 10L 大桶水数量输入区（仅在选中时显示） -->
+          <div id="cardProduct10L" class="hidden bg-teal-50/70 rounded-xl p-2.5 border border-teal-200 space-y-1.5 transition-all">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-2">
+                <span class="w-6 h-6 rounded-lg bg-teal-500 text-white flex items-center justify-center text-[10px] font-bold">10L</span>
+                <div>
+                  <span class="text-xs font-bold text-slate-800">10L 一次性大桶</span>
+                  <span class="text-[9px] text-teal-600 block leading-none">一次性 · 无需回桶</span>
+                </div>
+              </div>
+              <div class="flex items-center space-x-1.5">
+                <button type="button" onclick="stepQty('qty10L', -1)" class="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-600 flex items-center justify-center active:scale-95 text-base font-bold">-</button>
+                <input type="number" id="qty10L" value="5" min="0" oninput="calculateBalancePreview()" class="w-12 text-center font-bold text-slate-900 bg-white border border-slate-200 rounded-lg py-0.5 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+                <button type="button" onclick="stepQty('qty10L', 1)" class="w-7 h-7 rounded-lg bg-teal-600 text-white flex items-center justify-center active:scale-95 text-base font-bold">+</button>
+              </div>
+            </div>
+            <div class="flex space-x-1 justify-end">
+              <button type="button" onclick="addQty('qty10L', 5)" class="text-[10px] bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-50">+5</button>
+              <button type="button" onclick="addQty('qty10L', 10)" class="text-[10px] bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-50">+10</button>
+              <button type="button" onclick="setQty('qty10L', 0)" class="text-[10px] bg-slate-200/70 text-slate-500 px-1.5 py-0.5 rounded">清零</button>
+            </div>
+          </div>
+
+          <!-- 369ml 小瓶水（合并为1个产品，内设箱装/包装二选一切换） -->
+          <div id="cardProduct369" class="hidden bg-indigo-50/70 rounded-xl p-2.5 border border-indigo-200 space-y-2 transition-all">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-1.5">
+                <span class="w-6 h-6 rounded-lg bg-indigo-500 text-white flex items-center justify-center text-[10px] font-bold">369</span>
+                <span class="text-xs font-bold text-slate-800">369ml 小瓶水 (24瓶/件)</span>
+              </div>
+              <span class="text-[10px] text-indigo-700 font-semibold" id="packageUnitLabel">单位: 箱 (24瓶/箱)</span>
+            </div>
+
+            <!-- 包装规格选项切换（二选一） -->
+            <div class="grid grid-cols-2 gap-1.5 bg-white p-1 rounded-xl border border-indigo-100">
+              <button type="button" id="btnPackBox" onclick="select369PackageType('box')" class="py-1.5 px-2 rounded-lg text-xs font-bold bg-indigo-600 text-white shadow-sm transition flex items-center justify-center space-x-1">
+                <i data-lucide="package" class="w-3.5 h-3.5"></i>
+                <span>📦 纸箱装</span>
+              </button>
+              <button type="button" id="btnPackPack" onclick="select369PackageType('pack')" class="py-1.5 px-2 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 transition flex items-center justify-center space-x-1">
+                <i data-lucide="layers" class="w-3.5 h-3.5"></i>
+                <span>🛍️ 塑包装</span>
+              </button>
+            </div>
+
+            <!-- 数量调节器 -->
+            <div class="flex items-center justify-between pt-1">
+              <span class="text-[11px] font-semibold text-slate-600" id="packQuantityPrompt">输入订购箱数:</span>
+              <div class="flex items-center space-x-1.5">
+                <button type="button" onclick="stepQty('qty369Count', -1)" class="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-600 flex items-center justify-center active:scale-95 text-base font-bold">-</button>
+                <input type="number" id="qty369Count" value="2" min="0" oninput="calculateBalancePreview()" class="w-12 text-center font-bold text-slate-900 bg-white border border-slate-200 rounded-lg py-0.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                <button type="button" onclick="stepQty('qty369Count', 1)" class="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center active:scale-95 text-base font-bold">+</button>
+              </div>
+            </div>
+
+            <div class="flex space-x-1 justify-end">
+              <button type="button" onclick="addQty('qty369Count', 5)" class="text-[10px] bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-50">+5</button>
+              <button type="button" onclick="addQty('qty369Count', 10)" class="text-[10px] bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-50">+10</button>
+              <button type="button" onclick="addQty('qty369Count', 20)" class="text-[10px] bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-50">+20</button>
+              <button type="button" onclick="setQty('qty369Count', 0)" class="text-[10px] bg-slate-200/70 text-slate-500 px-1.5 py-0.5 rounded">清零</button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 步骤3：回空桶数量 -->
+        <div id="cardReturnBarrels" class="pt-1 border-t border-slate-100 space-y-1.5">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-bold text-slate-700 flex items-center space-x-1">
+              <span class="w-4 h-4 rounded-full bg-emerald-600 text-white text-[10px] flex items-center justify-center font-bold">3</span>
+              <span>本次回收 18.9L 空桶数</span>
+            </label>
+            <span class="text-[10px] text-slate-400" id="returnHintText">智能自动对齐</span>
+          </div>
+
+          <div class="bg-emerald-50/70 rounded-xl p-2.5 border border-emerald-200">
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center space-x-2">
+                <span class="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-xs font-bold">
+                  <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                </span>
+                <div>
+                  <span class="text-xs font-bold text-slate-800">回收空桶数量</span>
+                  <span class="text-[9px] text-emerald-700 block leading-none" id="barrelBalanceSummary">正常: 送多少回多少</span>
+                </div>
+              </div>
+              <div class="flex items-center space-x-1.5">
+                <button type="button" onclick="stepQty('returnBarrels', -1)" class="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-600 flex items-center justify-center active:scale-95 text-base font-bold">-</button>
+                <input type="number" id="returnBarrels" value="0" min="0" oninput="calculateBalancePreview()" class="w-12 text-center font-bold text-emerald-700 bg-white border border-emerald-300 rounded-lg py-0.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                <button type="button" onclick="stepQty('returnBarrels', 1)" class="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center active:scale-95 text-base font-bold">+</button>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap gap-1" id="quickReturnChips">
+              <button type="button" onclick="matchDeliveryBarrels()" class="text-[11px] bg-emerald-600 text-white font-medium px-2 py-0.5 rounded shadow-sm">
+                全回(平桶)
+              </button>
+              <button type="button" onclick="setQty('returnBarrels', 0)" class="text-[11px] bg-white text-slate-600 border border-slate-200 px-2 py-0.5 rounded">
+                未回(欠桶)
+              </button>
+              <button type="button" onclick="setReturnOwe(1)" class="text-[11px] bg-white text-slate-600 border border-slate-200 px-2 py-0.5 rounded">
+                少回1个
+              </button>
+              <button type="button" onclick="setReturnOwe(2)" class="text-[11px] bg-white text-slate-600 border border-slate-200 px-2 py-0.5 rounded">
+                少回2个
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤4：负责人手写签字确认 -->
+        <div class="pt-1 border-t border-slate-100">
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-xs font-bold text-slate-700 flex items-center space-x-1">
+              <span class="w-4 h-4 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center font-bold">4</span>
+              <span>负责人手写签字 (签收凭证)</span>
+            </label>
+            <span class="text-[10px] text-slate-400" id="signStatusText">选填 · 点击手写</span>
+          </div>
+
+          <div id="signPlaceholder" onclick="openSignatureModal()" class="border-2 border-dashed border-slate-200 hover:border-sky-400 bg-slate-50 hover:bg-sky-50/50 rounded-xl p-3 text-center cursor-pointer transition flex items-center justify-center space-x-1.5 text-slate-600 active:scale-[0.99]">
+            <i data-lucide="pen-tool" class="w-4 h-4 text-sky-600"></i>
+            <span class="text-xs font-semibold text-slate-700">点击此处手写电子签名 (客户/负责人签收)</span>
+          </div>
+
+          <div id="signPreviewContainer" class="hidden bg-white border border-slate-200 rounded-xl p-2.5 flex items-center justify-between shadow-sm">
+            <div class="flex items-center space-x-2.5">
+              <div class="h-10 w-24 bg-slate-50 rounded-lg border border-slate-100 flex items-center justify-center overflow-hidden p-0.5">
+                <img id="signPreviewImage" src="" alt="签名预览" class="max-h-full max-w-full object-contain">
+              </div>
+              <div>
+                <span class="text-xs font-bold text-slate-800 flex items-center space-x-1">
+                  <i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-600"></i>
+                  <span>已完成签署</span>
+                </span>
+                <span class="text-[9px] text-slate-400">凭证已绑定此单</span>
+              </div>
+            </div>
+            <div class="flex space-x-1">
+              <button type="button" onclick="openSignatureModal()" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg">
+                重签
+              </button>
+              <button type="button" onclick="clearSignatureData()" class="p-1 text-slate-400 hover:text-red-500 rounded-lg">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤5：备注信息 -->
+        <div>
+          <input type="text" id="recordNote" placeholder="备注信息（如：放门卫室、下次补欠桶、张师傅代收）" class="w-full bg-slate-50 border border-slate-200 text-xs rounded-xl p-2.5 focus:ring-2 focus:ring-sky-500 outline-none">
+        </div>
+
+        <!-- 保存按钮 -->
+        <div class="pt-1">
+          <button type="button" onclick="saveDeliveryRecord()" class="w-full py-3.5 px-4 bg-gradient-to-r from-sky-600 to-blue-600 text-white font-bold rounded-xl shadow-float flex items-center justify-center space-x-1.5 active:scale-[0.98] transition hover:shadow-lg">
+            <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+            <span id="saveBtnText">保存今日送水记录</span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- 当日送达明细（严格隐私隔离：只展示当前选择的客户！） -->
+      <div class="space-y-2 pt-1">
+        <div class="flex items-center justify-between px-1">
+          <h2 class="text-xs font-bold text-slate-800 flex items-center space-x-1">
+            <span id="todayCustomerListTitle">该客户今日已送达记录</span>
+            <span class="px-1.5 py-0.2 bg-sky-100 text-sky-800 text-[10px] rounded-full font-bold" id="currentCustomerRecordCount">0</span>
+          </h2>
+          <span class="text-[10px] text-slate-400">仅限当前客户可见 · 保护商业隐私</span>
+        </div>
+
+        <!-- 客户专属明细列表 -->
+        <div id="filteredTodayRecordsList" class="space-y-2"></div>
+      </div>
+
+    </section>
+
+    <!-- ==================== TAB 2: 小票与历史台账检索中心 (SEARCH) ==================== -->
+    <section id="tab-search" class="space-y-3.5 hidden">
+      <div class="bg-white rounded-2xl p-3.5 shadow-card border border-slate-100 space-y-3">
+        <h2 class="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+          <i data-lucide="search" class="w-4 h-4 text-sky-600"></i>
+          <span>小票明细与送货台账检索</span>
+        </h2>
+
+        <!-- 检索条件 -->
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <label class="block text-[10px] text-slate-500 mb-1">开始日期</label>
+            <input type="date" id="searchStartDate" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs font-semibold outline-none focus:ring-1 focus:ring-sky-500">
+          </div>
+          <div>
+            <label class="block text-[10px] text-slate-500 mb-1">结束日期</label>
+            <input type="date" id="searchEndDate" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs font-semibold outline-none focus:ring-1 focus:ring-sky-500">
+          </div>
+        </div>
+
+        <!-- 客户筛选与签字状态 -->
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <label class="block text-[10px] text-slate-500 mb-1">选择客户</label>
+            <select id="searchCustomerSelect" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs font-medium outline-none">
+              <option value="">全部客户</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] text-slate-500 mb-1">签字状态</label>
+            <select id="searchSignStatus" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs font-medium outline-none">
+              <option value="all">全部单据</option>
+              <option value="signed">仅已手写签字</option>
+              <option value="unsigned">未签字单据</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 快捷时间胶囊 -->
+        <div class="flex space-x-1 overflow-x-auto pb-0.5 no-scrollbar">
+          <button onclick="setSearchRange('today')" class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-sky-50 hover:text-sky-700">今日</button>
+          <button onclick="setSearchRange('yesterday')" class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-sky-50 hover:text-sky-700">昨日</button>
+          <button onclick="setSearchRange('thisMonth')" class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-sky-50 hover:text-sky-700">本月</button>
+          <button onclick="setSearchRange('lastMonth')" class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-sky-50 hover:text-sky-700">上月</button>
+          <button onclick="setSearchRange('last30')" class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-sky-50 hover:text-sky-700">近30天</button>
+        </div>
+
+        <button onclick="executeSearchOrders()" class="w-full py-2 bg-sky-600 text-white font-bold text-xs rounded-xl flex items-center justify-center space-x-1 shadow-sm hover:bg-sky-700 transition">
+          <i data-lucide="filter" class="w-3.5 h-3.5"></i>
+          <span>立即筛选台账记录</span>
+        </button>
+      </div>
+
+      <!-- 搜索结果列表（默认不显示全部明细，筛选后显示） -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between px-1">
+          <span class="text-xs font-bold text-slate-700">台账明细 (<span id="searchResultCount" class="text-sky-600">0</span> 笔)</span>
+          <span class="text-[10px] text-slate-400">点击小票可查看凭证/打印</span>
+        </div>
+        <div id="searchRecordsList" class="space-y-2">
+          <div class="bg-white rounded-2xl p-6 text-center border border-slate-100 text-slate-400 text-xs">
+            <i data-lucide="filter" class="w-7 h-7 mx-auto mb-2 text-slate-300"></i>
+            <p class="font-medium text-slate-600">请选择上方查询条件后</p>
+            <p class="mt-0.5 text-slate-400">点击【立即筛选台账记录】查看明细</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 3: 灵活时间统计与多选导出 (STATS) ==================== -->
+    <section id="tab-stats" class="space-y-3.5 hidden">
+      
+      <!-- 自由起止日期选择与查询 -->
+      <div class="bg-white rounded-2xl p-3.5 shadow-card border border-slate-100 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-800">自由统计周期选择</span>
+          <button onclick="openExportModal()" class="flex items-center space-x-1 bg-emerald-600 text-white text-xs font-bold px-2.5 py-1 rounded-lg shadow-sm hover:bg-emerald-700 active:scale-95 transition">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            <span>多选导出 Excel</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <label class="block text-[10px] text-slate-500 mb-1">起始日期</label>
+            <input type="date" id="statsStartDate" onchange="renderFlexibleStats()" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs font-semibold outline-none focus:ring-1 focus:ring-sky-500">
+          </div>
+          <div>
+            <label class="block text-[10px] text-slate-500 mb-1">截止日期</label>
+            <input type="date" id="statsEndDate" onchange="renderFlexibleStats()" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs font-semibold outline-none focus:ring-1 focus:ring-sky-500">
+          </div>
+        </div>
+
+        <!-- 快捷周期胶囊 -->
+        <div class="flex space-x-1 overflow-x-auto pb-0.5 no-scrollbar">
+          <button onclick="setStatsRange('today')" class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-sky-50 hover:text-sky-700">今日</button>
+          <button onclick="setStatsRange('thisWeek')" class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-sky-50 hover:text-sky-700">本周</button>
+          <button onclick="setStatsRange('thisMonth')" class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-sky-50 hover:text-sky-700">本月</button>
+          <button onclick="setStatsRange('lastMonth')" class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-sky-50 hover:text-sky-700">上月</button>
+          <button onclick="setStatsRange('last30')" class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-sky-50 hover:text-sky-700">近30天</button>
+        </div>
+      </div>
+
+      <!-- 周期数据汇总指标卡片 -->
+      <div class="grid grid-cols-2 gap-2">
+        <div class="bg-sky-50 rounded-xl p-3 border border-sky-100">
+          <span class="text-[11px] text-sky-700 font-medium">18.9L 大桶总送量</span>
+          <div class="flex items-baseline space-x-1 mt-0.5">
+            <span class="text-xl font-black text-sky-800" id="statsSum189">0</span>
+            <span class="text-[10px] text-sky-600">桶</span>
+          </div>
+        </div>
+        <div class="bg-emerald-50 rounded-xl p-3 border border-emerald-100">
+          <span class="text-[11px] text-emerald-700 font-medium">回收 18.9L 空桶总量</span>
+          <div class="flex items-baseline space-x-1 mt-0.5">
+            <span class="text-xl font-black text-emerald-800" id="statsSumReturn">0</span>
+            <span class="text-[10px] text-emerald-600">个</span>
+          </div>
+        </div>
+        <div class="bg-teal-50 rounded-xl p-3 border border-teal-100">
+          <span class="text-[11px] text-teal-700 font-medium">10L 一次性大桶</span>
+          <div class="flex items-baseline space-x-1 mt-0.5">
+            <span class="text-xl font-black text-teal-800" id="statsSum10L">0</span>
+            <span class="text-[10px] text-teal-600">桶</span>
+          </div>
+        </div>
+        <div class="bg-indigo-50 rounded-xl p-3 border border-indigo-100">
+          <span class="text-[11px] text-indigo-700 font-medium">369ml 纸箱 (24瓶/箱)</span>
+          <div class="flex items-baseline space-x-1 mt-0.5">
+            <span class="text-xl font-black text-indigo-800" id="statsSum369Box">0</span>
+            <span class="text-[10px] text-indigo-600">箱</span>
+          </div>
+        </div>
+        <div class="bg-purple-50 rounded-xl p-3 border border-purple-100 col-span-2">
+          <span class="text-[11px] text-purple-700 font-medium">369ml 塑包装 (24瓶/包)</span>
+          <div class="flex items-baseline space-x-1 mt-0.5">
+            <span class="text-xl font-black text-purple-800" id="statsSum369Pack">0</span>
+            <span class="text-[10px] text-purple-600">包</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 期间各客户汇总表格 -->
+      <div class="bg-white rounded-2xl p-3.5 shadow-card border border-slate-100 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <h3 class="text-xs font-bold text-slate-700">期间客户统计汇总</h3>
+          <span class="text-[10px] text-slate-400">点击客户可单独对账</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-[11px] text-left">
+            <thead>
+              <tr class="border-b border-slate-200 text-slate-400">
+                <th class="py-1.5 font-medium">客户名称</th>
+                <th class="py-1.5 text-right font-medium text-sky-600">18.9L</th>
+                <th class="py-1.5 text-right font-medium text-teal-600">10L</th>
+                <th class="py-1.5 text-right font-medium text-indigo-600">369纸箱</th>
+                <th class="py-1.5 text-right font-medium text-purple-600">369塑包</th>
+                <th class="py-1.5 text-right font-medium text-emerald-600">回空桶</th>
+              </tr>
+            </thead>
+            <tbody id="flexibleCustomerTableBody" class="divide-y divide-slate-100 text-slate-700 font-medium"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ==================== TAB 4: 客户与桶账管理 (CUSTOMER & LEDGER 整合) ==================== -->
+    <section id="tab-customer-ledger" class="space-y-3.5 hidden">
+      
+      <!-- 汇总看板（点击可切换展开 欠桶名单 或 结清名单） -->
+      <div class="grid grid-cols-2 gap-2">
+        <!-- 🔴 红色欠桶总池切换按钮 -->
+        <button type="button" id="cardDebtSummaryBtn" onclick="toggleLedgerView('debt')" class="bg-gradient-to-br from-rose-600 to-red-700 text-white rounded-2xl p-3.5 shadow-card text-left transition active:scale-[0.98] border-2 border-transparent">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-[11px] text-rose-100 font-medium">🔴 欠空桶客户名单</span>
+            <span class="text-[10px] bg-white/20 px-1.5 py-0.2 rounded-full font-bold" id="debtCustomerCountBadge">0 家</span>
+          </div>
+          <div class="flex items-baseline space-x-1 mt-1">
+            <span class="text-2xl font-black text-white" id="totalOutstandingBarrels">0</span>
+            <span class="text-xs text-rose-100">个在外待追回</span>
+          </div>
+          <span class="text-[10px] text-rose-200 mt-1 block flex items-center justify-between font-medium">
+            <span id="debtToggleText">点击查看欠桶列表 ▼</span>
+          </span>
+        </button>
+
+        <!-- 🟢 绿色平衡总池切换按钮 -->
+        <button type="button" id="cardCleanSummaryBtn" onclick="toggleLedgerView('clean')" class="bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-2xl p-3.5 shadow-card text-left transition active:scale-[0.98] border-2 border-transparent">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-[11px] text-emerald-100 font-medium">🟢 桶账结清客户</span>
+            <span class="text-[10px] bg-white/20 px-1.5 py-0.2 rounded-full font-bold" id="cleanCustomerCountBadge">0 家</span>
+          </div>
+          <div class="flex items-baseline space-x-1 mt-1">
+            <span class="text-2xl font-black text-white" id="cleanCustomerCount">0</span>
+            <span class="text-xs text-emerald-100">家无欠桶结存</span>
+          </div>
+          <span class="text-[10px] text-emerald-200 mt-1 block flex items-center justify-between font-medium">
+            <span id="cleanToggleText">点击查看结清列表 ▼</span>
+          </span>
+        </button>
+      </div>
+
+      <!-- 搜索栏 -->
+      <div class="relative">
+        <input type="text" id="ledgerSearchInput" oninput="renderCustomerLedger()" placeholder="快速搜索客户名称、负责人、电话或地址..." class="w-full bg-white border border-slate-200 text-xs rounded-xl pl-8 pr-3 py-2.5 focus:ring-2 focus:ring-sky-500 outline-none">
+        <div class="absolute inset-y-0 left-0 flex items-center pl-2.5 text-slate-400 pointer-events-none">
+          <i data-lucide="search" class="w-3.5 h-3.5"></i>
+        </div>
+      </div>
+
+      <!-- 按需展开的客户列表区域 -->
+      <div id="ledgerListContainer" class="space-y-2">
+        <div id="ledgerEmptyPrompt" class="bg-white rounded-2xl p-5 text-center border border-slate-100 text-slate-400 text-xs">
+          <i data-lucide="mouse-pointer-click" class="w-6 h-6 mx-auto mb-1.5 text-slate-300"></i>
+          <p class="font-medium text-slate-600">点击上方红色或绿色看板</p>
+          <p class="mt-0.5 text-slate-400">即可按需展开欠桶追回专区或结清客户列表</p>
+        </div>
+
+        <!-- 🔴 红色专区：欠空桶客户名单（点击红区后展开） -->
+        <div id="debtCustomersSection" class="hidden space-y-2">
+          <div class="flex items-center justify-between px-1">
+            <h3 class="text-xs font-bold text-rose-700 flex items-center space-x-1">
+              <span class="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
+              <span>【欠空桶客户专区】(需重点追回)</span>
+            </h3>
+            <button type="button" onclick="toggleLedgerView('none')" class="text-[10px] text-slate-400 hover:text-slate-600 bg-slate-100 px-2 py-0.5 rounded">收起 ▲</button>
+          </div>
+          <div id="debtCustomersList" class="space-y-2"></div>
+        </div>
+
+        <!-- 🟢 绿色专区：桶账结清客户名单（点击绿区后展开） -->
+        <div id="cleanCustomersSection" class="hidden space-y-2">
+          <div class="flex items-center justify-between px-1">
+            <h3 class="text-xs font-bold text-emerald-800 flex items-center space-x-1">
+              <span class="w-2 h-2 rounded-full bg-emerald-600"></span>
+              <span>【桶账结清客户专区】(正常无欠桶)</span>
+            </h3>
+            <button type="button" onclick="toggleLedgerView('none')" class="text-[10px] text-slate-400 hover:text-slate-600 bg-slate-100 px-2 py-0.5 rounded">收起 ▲</button>
+          </div>
+          <div id="cleanCustomersList" class="space-y-2"></div>
+        </div>
+      </div>
+
+      <!-- 客户名单库管理与添加（支持修改信息、一键拨号、高德导航） -->
+      <div class="bg-white rounded-2xl p-3.5 shadow-card border border-slate-100 space-y-2.5 pt-3">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xs font-bold text-slate-800">客户资料管理 (电话/地址/导航)</h2>
+          <button type="button" onclick="openAddCustomerModal()" class="text-xs bg-sky-50 text-sky-700 px-2.5 py-1 rounded-lg font-bold hover:bg-sky-100 flex items-center space-x-0.5 shadow-sm">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span>添加客户</span>
+          </button>
+        </div>
+        <div id="customerSettingsList" class="space-y-2 max-h-60 overflow-y-auto pr-1"></div>
+      </div>
+
+      <!-- 数据安全与备份 -->
+      <div class="bg-white rounded-2xl p-3.5 shadow-card border border-slate-100 space-y-2.5">
+        <h2 class="text-xs font-bold text-slate-800">本地数据安全与备份</h2>
+        <p class="text-[11px] text-slate-500">所有数据实时保存在本地浏览器中，已锁定历史单据防止意外删除。修改功能完全开放。</p>
+        
+        <div class="grid grid-cols-2 gap-2 pt-1">
+          <button type="button" onclick="exportBackupJSON()" class="py-2.5 px-3 bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl hover:bg-slate-200 flex items-center justify-center space-x-1.5 transition">
+            <i data-lucide="archive" class="w-4 h-4"></i>
+            <span>导出JSON备份</span>
+          </button>
+          <label class="py-2.5 px-3 bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl hover:bg-slate-200 flex items-center justify-center space-x-1.5 cursor-pointer transition text-center">
+            <i data-lucide="upload" class="w-4 h-4"></i>
+            <span>恢复/导入JSON</span>
+            <input type="file" id="importJsonInput" onchange="importBackupJSON(event)" accept=".json" class="hidden">
+          </label>
+        </div>
+
+        <button type="button" onclick="resetToDefaultData()" class="w-full py-1.5 text-xs text-red-500 hover:text-red-700 text-center block">
+          恢复为初始模板数据
+        </button>
+      </div>
+
+      <div class="text-center text-xs text-slate-400 py-2">
+        <p>送水统计与智能回桶管理系统 Pro v7.0</p>
+        <p class="mt-0.5">客户状态保持 · 一键拨号导航 · 4栏极简导航 · 动态小票</p>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- 底部固定标签栏 (4个标签) -->
+  <nav class="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-slate-200 px-3 py-1.5 no-print">
+    <div class="max-w-md mx-auto grid grid-cols-4 gap-1 text-center">
+      <button onclick="switchTab('tab-entry')" id="nav-tab-entry" class="py-1 flex flex-col items-center justify-center text-sky-600 transition">
+        <i data-lucide="edit-3" class="w-5 h-5 mb-0.5"></i>
+        <span class="text-[11px] font-bold">每日记账</span>
+      </button>
+      <button onclick="switchTab('tab-search')" id="nav-tab-search" class="py-1 flex flex-col items-center justify-center text-slate-400 hover:text-slate-600 transition">
+        <i data-lucide="search" class="w-5 h-5 mb-0.5"></i>
+        <span class="text-[11px] font-medium">小票台账</span>
+      </button>
+      <button onclick="switchTab('tab-stats')" id="nav-tab-stats" class="py-1 flex flex-col items-center justify-center text-slate-400 hover:text-slate-600 transition">
+        <i data-lucide="table-2" class="w-5 h-5 mb-0.5"></i>
+        <span class="text-[11px] font-medium">周期报表</span>
+      </button>
+      <button onclick="switchTab('tab-customer-ledger')" id="nav-tab-customer-ledger" class="py-1 flex flex-col items-center justify-center text-slate-400 hover:text-slate-600 transition">
+        <i data-lucide="shield-alert" class="w-5 h-5 mb-0.5"></i>
+        <span class="text-[11px] font-medium">客户与桶账</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ==================== 模态框 1：手写电子签名板 ==================== -->
+  <div id="signatureModal" style="display: none;" class="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-4 no-print">
+    <div class="bg-white w-full max-w-sm rounded-3xl p-4 shadow-2xl space-y-3.5">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <div class="w-7 h-7 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <i data-lucide="pen-tool" class="w-3.5 h-3.5"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-900 text-sm">负责人手写签名</h3>
+            <p class="text-[10px] text-slate-400">请在下方白色区域用手指签名</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeSignatureModal()" class="text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="relative bg-slate-50 border-2 border-dashed border-indigo-200 rounded-2xl overflow-hidden shadow-inner">
+        <canvas id="signatureCanvas" class="w-full h-44 block cursor-crosshair bg-white"></canvas>
+        <div id="canvasTip" class="pointer-events-none absolute inset-0 flex items-center justify-center text-slate-300 text-xs font-semibold">
+          在此处手写签名
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-2 pt-1">
+        <button type="button" onclick="clearSignatureCanvas()" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center justify-center space-x-1">
+          <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+          <span>重写</span>
+        </button>
+        <button type="button" onclick="confirmSignatureCanvas()" class="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center justify-center space-x-1 shadow-md shadow-indigo-600/30">
+          <i data-lucide="check" class="w-3.5 h-3.5"></i>
+          <span>保存签名</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 模态框 2：动态电子签收单小票凭证 ==================== -->
+  <div id="receiptModal" style="display: none;" class="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-3">
+    <div class="bg-white w-full max-w-sm rounded-3xl p-4 shadow-2xl space-y-3 max-h-[95vh] flex flex-col">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2 flex-shrink-0 no-print">
+        <div class="flex items-center space-x-1.5">
+          <div class="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <i data-lucide="receipt" class="w-3.5 h-3.5"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-900 text-sm">送水签收回执凭证</h3>
+            <p class="text-[9px] text-slate-400" id="receiptDate">日期: --</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeReceiptModal()" class="text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- 可打印 / 可截取为图片的小票区域 -->
+      <div id="printReceiptArea" class="bg-white p-4 rounded-2xl space-y-2.5 border border-slate-200 text-xs overflow-y-auto">
+        <div class="text-center pb-2 border-b border-dashed border-slate-300">
+          <h4 class="font-black text-slate-900 text-base tracking-wide">商品送达签收单</h4>
+          <p class="text-[10px] text-slate-500 mt-0.5">客户签收凭证 · 电子存根</p>
+        </div>
+
+        <div class="flex justify-between items-center text-xs">
+          <span class="text-slate-500 font-medium">客户名称:</span>
+          <span class="font-bold text-slate-900 text-sm" id="receiptCustomer">--</span>
+        </div>
+        <div class="flex justify-between items-center text-[11px] text-slate-500">
+          <span>送货日期:</span>
+          <span id="receiptDeliveryDate" class="font-semibold text-slate-700">--</span>
+        </div>
+
+        <!-- 动态品类表格（仅展示选中的产品！） -->
+        <div class="pt-1">
+          <table class="w-full text-left text-xs">
+            <thead class="border-y border-slate-200 text-[10px] text-slate-400">
+              <tr>
+                <th class="py-1">送达商品规格</th>
+                <th class="py-1 text-right">数量</th>
+              </tr>
+            </thead>
+            <tbody id="receiptItemsTableBody" class="divide-y divide-slate-100 text-slate-700">
+              <!-- 动态只插入本次订购的商品行 -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 空桶结算区（有18.9L或回桶时呈现） -->
+        <div id="receiptBarrelStatusBox" class="p-2 bg-slate-50 rounded-xl space-y-1 text-[11px] border border-slate-100">
+          <div class="flex justify-between">
+            <span class="text-slate-500">本次空桶差额:</span>
+            <span id="receiptStatus" class="font-bold">--</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-500">客户在押欠空桶总数:</span>
+            <span id="receiptCustomerTotalDebt" class="font-bold text-amber-700">0 个</span>
+          </div>
+        </div>
+
+        <div id="receiptNoteBox" class="bg-amber-50/70 p-2 rounded-lg text-amber-800 text-[11px] border border-amber-100 hidden">
+          <span>备注: </span><span id="receiptNote">--</span>
+        </div>
+
+        <!-- 签名区域 -->
+        <div class="pt-1.5 border-t border-dashed border-slate-300">
+          <div class="flex justify-between items-center mb-1">
+            <span class="text-[11px] text-slate-500 font-medium">客户/负责人签名确认:</span>
+            <span class="text-[9px] text-slate-400" id="receiptSignTime">已手写确认</span>
+          </div>
+          <div class="bg-white rounded-xl p-1.5 h-16 flex items-center justify-center border border-slate-200 overflow-hidden">
+            <img id="receiptSignatureImg" src="" alt="签名" class="max-h-full max-w-full object-contain">
+            <span id="receiptNoSignText" class="text-slate-300 text-xs hidden">未手写签名</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部动作按钮 -->
+      <div class="pt-1 flex-shrink-0 no-print">
+        <div class="grid grid-cols-2 gap-1.5">
+          <button type="button" onclick="downloadReceiptAsImage()" class="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center space-x-1 shadow-sm transition">
+            <i data-lucide="image" class="w-3.5 h-3.5"></i>
+            <span>保存为图片 (发微信)</span>
+          </button>
+          <button type="button" onclick="printReceipt()" class="py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl flex items-center justify-center space-x-1 shadow-sm transition">
+            <i data-lucide="printer" class="w-3.5 h-3.5"></i>
+            <span>打印原始单据</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 模态框 3：自定义多选客户导出 EXCEL ==================== -->
+  <div id="exportModal" style="display: none;" class="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 no-print">
+    <div class="bg-white w-full max-w-md rounded-3xl p-4 shadow-2xl space-y-3 max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center space-x-2">
+          <div class="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <i data-lucide="file-spreadsheet" class="w-3.5 h-3.5"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-900 text-sm">自定义多选导出 Excel</h3>
+            <p class="text-[10px] text-slate-400">勾选客户并导出对应对账表格</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeExportModal()" class="text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="space-y-2.5 overflow-y-auto pr-1 flex-1 text-xs">
+        
+        <!-- 导出日期范围 -->
+        <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+          <label class="block text-xs font-bold text-slate-700">1. 导出时间周期</label>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <span class="text-[10px] text-slate-400 block">开始日期</span>
+              <input type="date" id="exportStartDate" class="w-full bg-white border border-slate-200 rounded-lg p-1 text-xs font-semibold outline-none">
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 block">结束日期</span>
+              <input type="date" id="exportEndDate" class="w-full bg-white border border-slate-200 rounded-lg p-1 text-xs font-semibold outline-none">
+            </div>
+          </div>
+        </div>
+
+        <!-- 导出模式 -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">2. 选择导出模式</label>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="border border-slate-200 rounded-xl p-2 cursor-pointer has-[:checked]:border-sky-500 has-[:checked]:bg-sky-50/50 transition">
+              <input type="radio" name="exportMode" value="statement" checked class="hidden">
+              <span class="block text-xs font-bold text-slate-800">📄 客户对账单模式</span>
+              <span class="block text-[9px] text-slate-500 mt-0.5">按客户生成独立Sheet对账单，直接发给客户</span>
+            </label>
+            <label class="border border-slate-200 rounded-xl p-2 cursor-pointer has-[:checked]:border-sky-500 has-[:checked]:bg-sky-50/50 transition">
+              <input type="radio" name="exportMode" value="template" class="hidden">
+              <span class="block text-xs font-bold text-slate-800">📊 模板月度宽表</span>
+              <span class="block text-[9px] text-slate-500 mt-0.5">对齐原模板日期大表格式</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 客户多选 -->
+        <div class="space-y-1.5 pt-1 border-t border-slate-100">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-bold text-slate-700">3. 勾选客户 (<span id="selectedCustomerCount" class="text-sky-600 font-bold">0</span>/<span id="totalCustomerCount">0</span>)</label>
+            <div class="flex space-x-1 text-[10px]">
+              <button type="button" onclick="selectAllExportCustomers(true)" class="text-sky-600 font-medium px-1.5 py-0.5 rounded bg-sky-50">全选</button>
+              <button type="button" onclick="selectAllExportCustomers(false)" class="text-slate-500 px-1.5 py-0.5 rounded bg-slate-100">全不选</button>
+              <button type="button" onclick="selectDebtOnlyCustomers()" class="text-rose-600 px-1.5 py-0.5 rounded bg-rose-50">仅欠桶客户</button>
+            </div>
+          </div>
+
+          <div class="relative">
+            <input type="text" id="exportCustomerSearch" oninput="filterExportCustomerList()" placeholder="搜索客户名过滤..." class="w-full bg-slate-50 border border-slate-200 text-xs rounded-xl pl-7 pr-3 py-1.5 outline-none">
+            <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5"></i>
+          </div>
+
+          <div id="exportCustomerCheckboxes" class="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto p-1 bg-slate-50 rounded-xl border border-slate-100"></div>
+        </div>
+
+      </div>
+
+      <div class="flex flex-col space-y-1.5 pt-2 border-t border-slate-100 flex-shrink-0">
+        <button type="button" onclick="executeExportSelected()" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1 shadow-md shadow-emerald-600/20 active:scale-[0.98] transition">
+          <i data-lucide="file-check-2" class="w-4 h-4"></i>
+          <span>导出选中客户的 Excel 表格 (.xlsx)</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 模态框 4：添加新客户 ==================== -->
+  <div id="addCustomerModal" style="display: none;" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 no-print">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-slate-900 text-sm">添加新送水客户</h3>
+        <button type="button" onclick="closeAddCustomerModal()" class="text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="space-y-2.5 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">客户名称 / 单位全称 (必填)</label>
+          <input type="text" id="newCustomerName" placeholder="例如：星辰大厦物业、好再来餐饮..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">负责人姓名 / 联系人</label>
+          <input type="text" id="newCustomerContact" placeholder="例如：张经理、王师傅" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">联系电话 / 手机号</label>
+          <input type="tel" id="newCustomerPhone" placeholder="例如：13800000000" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">送货具体地址 (支持高德导航)</label>
+          <input type="text" id="newCustomerAddress" placeholder="例如：云州市星河区中山路88号" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">初始在押欠桶数量 (默认 0)</label>
+          <input type="number" id="newCustomerInitialDebt" value="0" min="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+      </div>
+      <div class="flex space-x-2 pt-1">
+        <button type="button" onclick="closeAddCustomerModal()" class="flex-1 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl">取消</button>
+        <button type="button" onclick="submitNewCustomer()" class="flex-1 py-2 bg-sky-600 text-white text-xs font-bold rounded-xl">确认添加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 模态框 5：修改客户信息 ==================== -->
+  <div id="editCustomerModal" style="display: none;" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 no-print">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-slate-900 text-sm">修改客户资料</h3>
+        <button type="button" onclick="closeEditCustomerModal()" class="text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="space-y-2.5 text-xs">
+        <input type="hidden" id="editCustomerId">
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">客户名称 / 单位全称 (必填)</label>
+          <input type="text" id="editCustomerName" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">负责人姓名 / 联系人</label>
+          <input type="text" id="editCustomerContact" placeholder="例如：张经理" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">联系电话 / 手机号</label>
+          <input type="tel" id="editCustomerPhone" placeholder="例如：13800000000" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">送货具体地址 (支持高德导航)</label>
+          <input type="text" id="editCustomerAddress" placeholder="例如：云州市星河区中山路88号" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+      </div>
+      <div class="flex space-x-2 pt-1">
+        <button type="button" onclick="closeEditCustomerModal()" class="flex-1 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl">取消</button>
+        <button type="button" onclick="submitEditCustomer()" class="flex-1 py-2 bg-sky-600 text-white text-xs font-bold rounded-xl">保存修改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 模态框 6：单独回收空桶 ==================== -->
+  <div id="quickClearDebtModal" style="display: none;" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 no-print">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-slate-900 text-sm">单独回收 18.9L 空桶 / 清欠</h3>
+        <button type="button" onclick="closeQuickDebtModal()" class="text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <p class="text-xs text-slate-500" id="quickDebtCustomerName">客户：--</p>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1">本次收回 18.9L 空桶数量</label>
+        <div class="flex items-center space-x-2">
+          <button type="button" onclick="stepQty('quickDebtQty', -1)" class="w-9 h-9 rounded-xl bg-slate-100 font-bold text-base">-</button>
+          <input type="number" id="quickDebtQty" value="1" min="1" class="flex-1 text-center font-bold text-emerald-700 bg-emerald-50 border border-emerald-300 rounded-xl py-1.5 text-base outline-none">
+          <button type="button" onclick="stepQty('quickDebtQty', 1)" class="w-9 h-9 rounded-xl bg-emerald-600 text-white font-bold text-base">+</button>
+        </div>
+      </div>
+      <div class="flex space-x-2 pt-1">
+        <button type="button" onclick="closeQuickDebtModal()" class="flex-1 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl">取消</button>
+        <button type="button" onclick="submitQuickDebtReturn()" class="flex-1 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl">确认收回入账</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast 提示 (采用绝对内联样式与精确定时器控制，2秒后绝对自动淡出隐藏) -->
+  <div id="toast" style="display: none; opacity: 0; transition: opacity 0.3s ease-in-out;" class="fixed top-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2 rounded-full text-xs font-semibold shadow-lg backdrop-blur-md flex items-center space-x-1.5 no-print">
+    <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>
+    <span id="toastMessage">操作成功</span>
+  </div>
+
+  <!-- JavaScript 核心逻辑 -->
+  <script>
+    const DEFAULT_CUSTOMERS = [
+      { id: 'c1', name: '星辰大厦物业', contact: '王经理', phone: '13800138001', address: '云州市星河区中山路88号' },
+      { id: 'c2', name: '蓝天幼儿园', contact: '李园长', phone: '13800138002', address: '云州市星河区文昌路12号' },
+      { id: 'c3', name: '好再来餐饮公司', contact: '张老板', phone: '13800138003', address: '云州市青山区解放路56号' },
+      { id: 'c4', name: '云州第一中学', contact: '刘主任', phone: '13800138004', address: '云州市青山区育才街9号' },
+      { id: 'c5', name: '明州宾馆', contact: '陈经理', phone: '13800138005', address: '云州市滨河区和平大道201号' },
+      { id: 'c6', name: '示例物流园', contact: '赵队长', phone: '13800138006', address: '云州市滨河区物流大道1号' },
+      { id: 'c7', name: '青禾食品厂', contact: '周厂长', phone: '13800138007', address: '云州市星河区工业路33号' },
+      { id: 'c8', name: '云州市政务服务中心', contact: '吴科长', phone: '13800138008', address: '云州市星河区政务路1号' },
+      { id: 'c9', name: '康乐健身中心', contact: '郑教练', phone: '13800138009', address: '云州市青山区体育街45号' },
+      { id: 'c10', name: '示例汽车维修公司', contact: '孙经理', phone: '13800138010', address: '云州市滨河区汽配城7号' },
+      { id: 'c11', name: '云州图书馆', contact: '林管理员', phone: '13800138011', address: '云州市星河区书香路6号' },
+      { id: 'c12', name: '锦绣花园社区', contact: '何主任', phone: '13800138012', address: '云州市青山区锦绣路100号' }
+    ];
+
+    let state = {
+      customers: [],
+      records: [],
+      activeEditRecordId: null,
+      currentQuickDebtCustomerId: null,
+      currentSignatureBase64: null,
+      currentViewingRecordId: null,
+
+      selectedProducts: {
+        '189': false,
+        '10L': false,
+        '369': false,
+      },
+      current369Type: 'box',
+
+      // 客户桶账当前展开的专区：默认展示欠桶专区
+      ledgerActiveView: 'debt',
+    };
+
+    const STORAGE_KEY = 'WATER_DELIVERY_APP_STATE_V7';
+
+    let sigCanvas, sigCtx, isDrawing = false, hasSignature = false;
+    let toastTimer = null;
+
+    function openModal(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.style.display = 'flex';
+      el.classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeModal(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.style.display = 'none';
+      el.classList.add('hidden');
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      loadState();
+      initDateInputs();
+      renderCustomerSelectors();
+      updateProductSelectionUI();
+      renderTodayRecords();
+      renderCustomerLedger();
+      renderFlexibleStats();
+      initSignatureCanvas();
+      lucide.createIcons();
+    });
+
+    function loadState() {
+      try {
+        const data = localStorage.getItem(STORAGE_KEY);
+        if (data) {
+          const parsed = JSON.parse(data);
+          // 智能补全客户信息：若缓存中的客户缺少电话/地址/联系人，自动用标准库补齐
+          if (parsed.customers && parsed.customers.length) {
+            state.customers = parsed.customers.map(c => {
+              const defaultMatch = DEFAULT_CUSTOMERS.find(dc => dc.name === c.name || dc.id === c.id);
+              return {
+                id: c.id || (defaultMatch ? defaultMatch.id : 'c_' + Date.now()),
+                name: c.name,
+                contact: c.contact || (defaultMatch ? defaultMatch.contact : ''),
+                phone: c.phone || (defaultMatch ? defaultMatch.phone : ''),
+                address: c.address || (defaultMatch ? defaultMatch.address : '')
+              };
+            });
+          } else {
+            state.customers = DEFAULT_CUSTOMERS;
+          }
+
+          // 智能检查历史送量：若旧单据累计18.9L送量为0，自动载入标准业务数据
+          const totalExisting189 = (parsed.records || []).reduce((sum, r) => sum + Number(r.qty189 || 0), 0);
+          if (!parsed.records || parsed.records.length === 0 || totalExisting189 === 0) {
+            seedInitialSampleData();
+          } else {
+            state.records = parsed.records;
+          }
+        } else {
+          state.customers = DEFAULT_CUSTOMERS;
+          state.records = [];
+          seedInitialSampleData();
+        }
+      } catch (e) {
+        state.customers = DEFAULT_CUSTOMERS;
+        state.records = [];
+        seedInitialSampleData();
+      }
+      saveState();
+    }
+
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        customers: state.customers,
+        records: state.records
+      }));
+    }
+
+    // 真实业务初始送水及欠桶数据
+    function seedInitialSampleData() {
+      state.records = [
+        // 欠空桶客户群示例 (送 18.9L > 回空桶)
+        { id: 'rec_init_1', date: '2026-08-01', customerName: '星辰大厦物业', qty189: 55, qty10L: 0, qty369Type: 'box', qty369Count: 0, returnBarrels: 50, signature: null, note: '欠5个空桶下次补', timestamp: Date.now() - 6000 },
+        { id: 'rec_init_2', date: '2026-08-01', customerName: '蓝天幼儿园', qty189: 60, qty10L: 5, qty369Type: 'box', qty369Count: 0, returnBarrels: 55, signature: null, note: '欠5个空桶', timestamp: Date.now() - 5000 },
+        { id: 'rec_init_3', date: '2026-08-01', customerName: '好再来餐饮公司', qty189: 45, qty10L: 0, qty369Type: 'box', qty369Count: 20, returnBarrels: 35, signature: null, note: '欠10个空桶待收', timestamp: Date.now() - 4000 },
+        { id: 'rec_init_4', date: '2026-08-01', customerName: '青禾食品厂', qty189: 30, qty10L: 5, qty369Type: 'box', qty369Count: 0, returnBarrels: 22, signature: null, note: '欠8个桶', timestamp: Date.now() - 3000 },
+        { id: 'rec_init_5', date: '2026-08-01', customerName: '云州图书馆', qty189: 40, qty10L: 0, qty369Type: 'box', qty369Count: 10, returnBarrels: 30, signature: null, note: '欠10个桶待收', timestamp: Date.now() - 2000 },
+        { id: 'rec_init_6', date: '2026-08-01', customerName: '示例汽车维修公司', qty189: 25, qty10L: 0, qty369Type: 'pack', qty369Count: 5, returnBarrels: 15, signature: null, note: '欠10个桶', timestamp: Date.now() - 1000 },
+
+        // 桶账结清客户群示例 (送 18.9L = 回空桶)
+        { id: 'rec_init_7', date: '2026-08-01', customerName: '云州第一中学', qty189: 20, qty10L: 5, qty369Type: 'box', qty369Count: 0, returnBarrels: 20, signature: null, note: '平桶结清', timestamp: Date.now() },
+        { id: 'rec_init_8', date: '2026-08-01', customerName: '明州宾馆', qty189: 15, qty10L: 0, qty369Type: 'box', qty369Count: 0, returnBarrels: 15, signature: null, note: '平桶结清', timestamp: Date.now() },
+        { id: 'rec_init_9', date: '2026-08-01', customerName: '示例物流园', qty189: 10, qty10L: 5, qty369Type: 'box', qty369Count: 0, returnBarrels: 10, signature: null, note: '平桶结清', timestamp: Date.now() },
+        { id: 'rec_init_10', date: '2026-08-01', customerName: '锦绣花园社区', qty189: 18, qty10L: 0, qty369Type: 'pack', qty369Count: 10, returnBarrels: 18, signature: null, note: '平桶结清', timestamp: Date.now() },
+        { id: 'rec_init_11', date: '2026-08-01', customerName: '云州市政务服务中心', qty189: 12, qty10L: 5, qty369Type: 'box', qty369Count: 0, returnBarrels: 12, signature: null, note: '平桶结清', timestamp: Date.now() },
+        { id: 'rec_init_12', date: '2026-08-01', customerName: '康乐健身中心', qty189: 8, qty10L: 0, qty369Type: 'box', qty369Count: 0, returnBarrels: 8, signature: null, note: '平桶结清', timestamp: Date.now() },
+      ];
+    }
+
+    function initDateInputs() {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const todayStr = `${yyyy}-${mm}-${dd}`;
+      const monthStart = `${yyyy}-${mm}-01`;
+
+      document.getElementById('entryDate').value = todayStr;
+      
+      document.getElementById('statsStartDate').value = monthStart;
+      document.getElementById('statsEndDate').value = todayStr;
+
+      document.getElementById('searchStartDate').value = monthStart;
+      document.getElementById('searchEndDate').value = todayStr;
+
+      document.getElementById('exportStartDate').value = monthStart;
+      document.getElementById('exportEndDate').value = todayStr;
+
+      updateHeaderDateDisplay(todayStr);
+    }
+
+    function updateHeaderDateDisplay(dateStr) {
+      const parts = dateStr.split('-');
+      const d = new Date(parts[0], parts[1] - 1, parts[2]);
+      const weekDays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+      const weekStr = weekDays[d.getDay()];
+      document.getElementById('headerDateDisplay').textContent = `${parts[0]}年${parts[1]}月${parts[2]}日 · ${weekStr}`;
+    }
+
+    function onDateChange() {
+      const d = document.getElementById('entryDate').value;
+      if (d) {
+        updateHeaderDateDisplay(d);
+        renderTodayRecords();
+      }
+    }
+
+    function setTodayDate() {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      document.getElementById('entryDate').value = `${yyyy}-${mm}-${dd}`;
+      onDateChange();
+    }
+
+    function renderCustomerSelectors() {
+      const select = document.getElementById('customerSelect');
+      const searchSelect = document.getElementById('searchCustomerSelect');
+      const chipsContainer = document.getElementById('quickCustomerChips');
+      const settingsList = document.getElementById('customerSettingsList');
+
+      select.innerHTML = '<option value="">-- 请选择送达客户 --</option>';
+      searchSelect.innerHTML = '<option value="">全部客户</option>';
+      chipsContainer.innerHTML = '';
+      settingsList.innerHTML = '';
+
+      state.customers.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.name;
+        opt.textContent = c.name;
+        select.appendChild(opt);
+
+        const opt2 = document.createElement('option');
+        opt2.value = c.name;
+        opt2.textContent = c.name;
+        searchSelect.appendChild(opt2);
+
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-sky-100 hover:text-sky-800 transition active:scale-95';
+        chip.textContent = c.name;
+        chip.onclick = () => {
+          select.value = c.name;
+          onCustomerSelectChange();
+        };
+        chipsContainer.appendChild(chip);
+
+        // 客户资料管理列表项（支持修改、一键拨打电话、一键高德导航）
+        const navUrl = `https://uri.amap.com/navigation?to=${encodeURIComponent(c.address || c.name)}&mode=car&policy=1&coordinate=gaode&callnative=1`;
+        const item = document.createElement('div');
+        item.className = 'p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex flex-col space-y-1.5';
+        item.innerHTML = `
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-900 text-xs">${c.name}</span>
+            <div class="flex space-x-1">
+              <button type="button" onclick="openEditCustomerModal('${c.id}')" class="px-2 py-0.5 bg-slate-200 text-slate-700 rounded text-[11px] font-semibold hover:bg-slate-300">
+                修改资料
+              </button>
+              ${c.phone ? `<a href="tel:${c.phone}" class="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[11px] font-bold hover:bg-emerald-100 flex items-center space-x-0.5"><i data-lucide="phone-call" class="w-3 h-3"></i><span>拨打</span></a>` : ''}
+              ${c.address ? `<a href="${navUrl}" target="_blank" class="px-2 py-0.5 bg-sky-50 text-sky-700 rounded text-[11px] font-bold hover:bg-sky-100 flex items-center space-x-0.5"><i data-lucide="navigation" class="w-3 h-3"></i><span>高德导航</span></a>` : ''}
+            </div>
+          </div>
+          <div class="text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5">
+            <span>负责人: <b class="text-slate-700">${c.contact || '未填写'}</b></span>
+            <span>电话: <b class="text-slate-700">${c.phone || '未填写'}</b></span>
+          </div>
+          ${c.address ? `<p class="text-[10px] text-slate-400 truncate flex items-center space-x-0.5"><i data-lucide="map-pin" class="w-3 h-3 text-slate-400 flex-shrink-0"></i><span class="truncate">${c.address}</span></p>` : ''}
+        `;
+        settingsList.appendChild(item);
+      });
+
+      lucide.createIcons();
+    }
+
+    function onCustomerSelectChange() {
+      const select = document.getElementById('customerSelect');
+      const customerName = select.value;
+      const alertBox = document.getElementById('customerDebtAlert');
+      const contactBar = document.getElementById('customerQuickContactBar');
+
+      if (!customerName) {
+        alertBox.classList.add('hidden');
+        contactBar.classList.add('hidden');
+        renderTodayRecords();
+        return;
+      }
+
+      const custObj = state.customers.find(c => c.name === customerName);
+      if (custObj && (custObj.contact || custObj.phone || custObj.address)) {
+        document.getElementById('quickContactName').textContent = custObj.contact ? `联系人: ${custObj.contact}` : '联系人: -';
+        document.getElementById('quickContactPhone').textContent = custObj.phone || '';
+        document.getElementById('quickContactAddress').textContent = custObj.address ? `地址: ${custObj.address}` : '地址: 未填写';
+        document.getElementById('quickCallLink').href = custObj.phone ? `tel:${custObj.phone}` : '#';
+        document.getElementById('quickNaviLink').href = `https://uri.amap.com/navigation?to=${encodeURIComponent(custObj.address || custObj.name)}&mode=car&policy=1&coordinate=gaode&callnative=1`;
+        contactBar.classList.remove('hidden');
+      } else {
+        contactBar.classList.add('hidden');
+      }
+
+      const debt = calculateCustomerDebt(customerName);
+      if (debt > 0) {
+        document.getElementById('customerDebtCount').textContent = debt;
+        alertBox.classList.remove('hidden');
+      } else {
+        alertBox.classList.add('hidden');
+      }
+
+      renderTodayRecords();
+      lucide.createIcons();
+    }
+
+    function calculateCustomerDebt(customerName) {
+      let sent189 = 0;
+      let returned = 0;
+      state.records.forEach(r => {
+        if (r.customerName === customerName) {
+          sent189 += Number(r.qty189 || 0);
+          returned += Number(r.returnBarrels || 0);
+        }
+      });
+      return Math.max(0, sent189 - returned);
+    }
+
+    // 商品动态点选切换
+    function toggleProductSelect(prodKey) {
+      state.selectedProducts[prodKey] = !state.selectedProducts[prodKey];
+      
+      if (prodKey === '189' && state.selectedProducts['189']) {
+        if (parseInt(document.getElementById('qty189').value || 0, 10) === 0) {
+          document.getElementById('qty189').value = 10;
+        }
+        document.getElementById('returnBarrels').value = document.getElementById('qty189').value;
+      }
+
+      if (prodKey === '10L' && state.selectedProducts['10L']) {
+        if (parseInt(document.getElementById('qty10L').value || 0, 10) === 0) {
+          document.getElementById('qty10L').value = 5;
+        }
+      }
+
+      if (prodKey === '369' && state.selectedProducts['369']) {
+        if (parseInt(document.getElementById('qty369Count').value || 0, 10) === 0) {
+          document.getElementById('qty369Count').value = 2;
+        }
+      }
+
+      updateProductSelectionUI();
+      calculateBalancePreview();
+    }
+
+    function quickSelectReturnOnly() {
+      const debt = calculateCustomerDebt(document.getElementById('customerSelect').value);
+      document.getElementById('returnBarrels').value = debt > 0 ? debt : 1;
+      calculateBalancePreview();
+      showToast(`已填入回收空桶数: ${document.getElementById('returnBarrels').value} 个`);
+    }
+
+    function updateProductSelectionUI() {
+      const is189 = state.selectedProducts['189'];
+      const is10L = state.selectedProducts['10L'];
+      const is369 = state.selectedProducts['369'];
+
+      updateToggleButton('btnToggle189', 'titleToggle189', '🪣 18.9L大桶', is189, 'border-sky-500 bg-sky-50 text-sky-700 font-bold');
+      updateToggleButton('btnToggle10L', 'titleToggle10L', '🫗 10L大桶', is10L, 'border-teal-500 bg-teal-50 text-teal-700 font-bold');
+      updateToggleButton('btnToggle369', 'titleToggle369', '🍾 369ml小瓶', is369, 'border-indigo-500 bg-indigo-50 text-indigo-700 font-bold');
+
+      toggleCard('cardProduct189', is189);
+      toggleCard('cardProduct10L', is10L);
+      toggleCard('cardProduct369', is369);
+
+      const anySelected = is189 || is10L || is369;
+      toggleCard('noProductSelectedTip', !anySelected);
+    }
+
+    function updateToggleButton(btnId, titleId, text, isSelected, activeClasses) {
+      const btn = document.getElementById(btnId);
+      if (isSelected) {
+        btn.className = `p-2.5 rounded-xl border ${activeClasses} flex flex-col items-center justify-center transition active:scale-95 text-center shadow-sm`;
+        document.getElementById(titleId).innerHTML = `${text} <span class="text-xs">✓</span>`;
+      } else {
+        btn.className = 'p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 flex flex-col items-center justify-center transition active:scale-95 text-center';
+        document.getElementById(titleId).textContent = text;
+      }
+    }
+
+    function toggleCard(cardId, isShow) {
+      const el = document.getElementById(cardId);
+      if (!el) return;
+      if (isShow) el.classList.remove('hidden');
+      else el.classList.add('hidden');
+    }
+
+    function select369PackageType(type) {
+      state.current369Type = type;
+      const btnBox = document.getElementById('btnPackBox');
+      const btnPack = document.getElementById('btnPackPack');
+      const label = document.getElementById('packageUnitLabel');
+      const prompt = document.getElementById('packQuantityPrompt');
+
+      if (type === 'box') {
+        btnBox.className = 'py-1.5 px-2 rounded-lg text-xs font-bold bg-indigo-600 text-white shadow-sm transition flex items-center justify-center space-x-1';
+        btnPack.className = 'py-1.5 px-2 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 transition flex items-center justify-center space-x-1';
+        label.textContent = '单位: 箱 (24瓶/箱)';
+        prompt.textContent = '输入订购箱数:';
+      } else {
+        btnPack.className = 'py-1.5 px-2 rounded-lg text-xs font-bold bg-purple-600 text-white shadow-sm transition flex items-center justify-center space-x-1';
+        btnBox.className = 'py-1.5 px-2 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 transition flex items-center justify-center space-x-1';
+        label.textContent = '单位: 包 (24瓶/包)';
+        prompt.textContent = '输入订购包数:';
+      }
+      lucide.createIcons();
+    }
+
+    function stepQty(inputId, delta) {
+      const el = document.getElementById(inputId);
+      let val = parseInt(el.value || 0, 10) + delta;
+      if (val < 0) val = 0;
+      el.value = val;
+      if (inputId === 'qty189') on189QtyChange();
+      else calculateBalancePreview();
+    }
+
+    function addQty(inputId, add) {
+      const el = document.getElementById(inputId);
+      let val = parseInt(el.value || 0, 10) + add;
+      el.value = val;
+      if (inputId === 'qty189') on189QtyChange();
+      else calculateBalancePreview();
+    }
+
+    function setQty(inputId, val) {
+      const el = document.getElementById(inputId);
+      el.value = val;
+      if (inputId === 'qty189') on189QtyChange();
+      else calculateBalancePreview();
+    }
+
+    function on189QtyChange() {
+      const qty189 = parseInt(document.getElementById('qty189').value || 0, 10);
+      const returnEl = document.getElementById('returnBarrels');
+      if (!state.activeEditRecordId) {
+        returnEl.value = qty189;
+      }
+      calculateBalancePreview();
+    }
+
+    function matchDeliveryBarrels() {
+      const qty189 = parseInt(document.getElementById('qty189').value || 0, 10);
+      document.getElementById('returnBarrels').value = qty189;
+      calculateBalancePreview();
+    }
+
+    function setReturnOwe(oweCount) {
+      const qty189 = parseInt(document.getElementById('qty189').value || 0, 10);
+      const res = Math.max(0, qty189 - oweCount);
+      document.getElementById('returnBarrels').value = res;
+      calculateBalancePreview();
+    }
+
+    function calculateBalancePreview() {
+      const is189 = state.selectedProducts['189'];
+      const qty189 = is189 ? parseInt(document.getElementById('qty189').value || 0, 10) : 0;
+      const returnQty = parseInt(document.getElementById('returnBarrels').value || 0, 10);
+      const diff = qty189 - returnQty;
+      const summaryEl = document.getElementById('barrelBalanceSummary');
+
+      if (!is189 && returnQty === 0) {
+        summaryEl.textContent = '无需回收 (一次性商品)';
+        summaryEl.className = 'text-[9px] text-slate-500 block leading-none';
+      } else if (diff === 0) {
+        summaryEl.textContent = '平桶 · 送' + qty189 + '回' + returnQty;
+        summaryEl.className = 'text-[9px] text-emerald-700 font-bold block leading-none';
+      } else if (diff > 0) {
+        summaryEl.textContent = `欠桶 · 本次少回 ${diff} 个空桶`;
+        summaryEl.className = 'text-[9px] text-amber-700 font-bold block leading-none';
+      } else {
+        summaryEl.textContent = `补还 · 本次多收还 ${Math.abs(diff)} 个空桶`;
+        summaryEl.className = 'text-[9px] text-sky-700 font-bold block leading-none';
+      }
+    }
+
+    function initSignatureCanvas() {
+      sigCanvas = document.getElementById('signatureCanvas');
+      if (!sigCanvas) return;
+      sigCtx = sigCanvas.getContext('2d');
+
+      function resizeCanvas() {
+        const rect = sigCanvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        sigCanvas.width = rect.width * dpr;
+        sigCanvas.height = rect.height * dpr;
+        sigCtx.scale(dpr, dpr);
+        sigCtx.lineWidth = 3;
+        sigCtx.lineCap = 'round';
+        sigCtx.lineJoin = 'round';
+        sigCtx.strokeStyle = '#0f172a';
+      }
+
+      function getPos(e) {
+        const rect = sigCanvas.getBoundingClientRect();
+        if (e.touches && e.touches.length > 0) {
+          return {
+            x: e.touches[0].clientX - rect.left,
+            y: e.touches[0].clientY - rect.top
+          };
+        }
+        return {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        };
+      }
+
+      function startDraw(e) {
+        e.preventDefault();
+        isDrawing = true;
+        hasSignature = true;
+        document.getElementById('canvasTip').classList.add('hidden');
+        const pos = getPos(e);
+        sigCtx.beginPath();
+        sigCtx.moveTo(pos.x, pos.y);
+      }
+
+      function draw(e) {
+        if (!isDrawing) return;
+        e.preventDefault();
+        const pos = getPos(e);
+        sigCtx.lineTo(pos.x, pos.y);
+        sigCtx.stroke();
+      }
+
+      function stopDraw(e) {
+        if (!isDrawing) return;
+        isDrawing = false;
+      }
+
+      sigCanvas.addEventListener('mousedown', startDraw);
+      sigCanvas.addEventListener('mousemove', draw);
+      window.addEventListener('mouseup', stopDraw);
+
+      sigCanvas.addEventListener('touchstart', startDraw, { passive: false });
+      sigCanvas.addEventListener('touchmove', draw, { passive: false });
+      sigCanvas.addEventListener('touchend', stopDraw);
+
+      window.addEventListener('resize', resizeCanvas);
+      setTimeout(resizeCanvas, 300);
+    }
+
+    function openSignatureModal() {
+      openModal('signatureModal');
+      const rect = sigCanvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      sigCanvas.width = rect.width * dpr;
+      sigCanvas.height = rect.height * dpr;
+      sigCtx.scale(dpr, dpr);
+      sigCtx.lineWidth = 3;
+      sigCtx.lineCap = 'round';
+      sigCtx.lineJoin = 'round';
+      sigCtx.strokeStyle = '#0f172a';
+
+      sigCtx.clearRect(0, 0, rect.width, rect.height);
+      hasSignature = false;
+      document.getElementById('canvasTip').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeSignatureModal() {
+      closeModal('signatureModal');
+    }
+
+    function clearSignatureCanvas() {
+      const rect = sigCanvas.getBoundingClientRect();
+      sigCtx.clearRect(0, 0, rect.width, rect.height);
+      hasSignature = false;
+      document.getElementById('canvasTip').classList.remove('hidden');
+    }
+
+    function confirmSignatureCanvas() {
+      if (!hasSignature) {
+        showToast('请先在画布上手写签名后再确认！', true);
+        return;
+      }
+      const dataUrl = sigCanvas.toDataURL('image/png');
+      state.currentSignatureBase64 = dataUrl;
+      
+      document.getElementById('signPreviewImage').src = dataUrl;
+      document.getElementById('signPlaceholder').classList.add('hidden');
+      document.getElementById('signPreviewContainer').classList.remove('hidden');
+      document.getElementById('signStatusText').textContent = '已签署 ✓';
+      document.getElementById('signStatusText').className = 'text-[10px] text-emerald-600 font-bold';
+
+      closeSignatureModal();
+      showToast('签名已保存！');
+    }
+
+    function clearSignatureData() {
+      state.currentSignatureBase64 = null;
+      document.getElementById('signPreviewImage').src = '';
+      document.getElementById('signPlaceholder').classList.remove('hidden');
+      document.getElementById('signPreviewContainer').classList.add('hidden');
+      document.getElementById('signStatusText').textContent = '选填 · 点击手写';
+      document.getElementById('signStatusText').className = 'text-[10px] text-slate-400';
+    }
+
+    // 保存记录：保留当前选中的客户与明细，仅重置输入框
+    function saveDeliveryRecord() {
+      const date = document.getElementById('entryDate').value;
+      const customerSelect = document.getElementById('customerSelect');
+      const customerName = customerSelect.value;
+
+      if (!customerName) {
+        showToast('请先选择送达客户！', true);
+        return;
+      }
+
+      const qty189 = state.selectedProducts['189'] ? parseInt(document.getElementById('qty189').value || 0, 10) : 0;
+      const qty10L = state.selectedProducts['10L'] ? parseInt(document.getElementById('qty10L').value || 0, 10) : 0;
+      const qty369Count = state.selectedProducts['369'] ? parseInt(document.getElementById('qty369Count').value || 0, 10) : 0;
+      const qty369Type = state.current369Type;
+      const returnBarrels = parseInt(document.getElementById('returnBarrels').value || 0, 10);
+      const note = document.getElementById('recordNote').value.trim();
+      const signature = state.currentSignatureBase64;
+
+      if (qty189 === 0 && qty10L === 0 && qty369Count === 0 && returnBarrels === 0) {
+        showToast('请至少选择一项送货商品或回空桶！', true);
+        return;
+      }
+
+      if (state.activeEditRecordId) {
+        const index = state.records.findIndex(r => r.id === state.activeEditRecordId);
+        if (index !== -1) {
+          state.records[index] = {
+            ...state.records[index],
+            date,
+            customerName,
+            qty189,
+            qty10L,
+            qty369Type,
+            qty369Count,
+            returnBarrels,
+            signature: signature !== undefined ? signature : state.records[index].signature,
+            note,
+            timestamp: Date.now()
+          };
+          showToast('记录修改成功！');
+        }
+        state.activeEditRecordId = null;
+        document.getElementById('saveBtnText').textContent = '保存今日送水记录';
+      } else {
+        const newRecord = {
+          id: 'rec_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+          date,
+          customerName,
+          qty189,
+          qty10L,
+          qty369Type,
+          qty369Count,
+          returnBarrels,
+          signature: signature || null,
+          note,
+          timestamp: Date.now()
+        };
+        state.records.unshift(newRecord);
+        showToast('送水单据已成功保存！');
+      }
+
+      saveState();
+
+      // 重置商品输入项，但保留当前客户！
+      resetFormInputsKeepCustomer(customerName);
+      renderCustomerLedger();
+      renderFlexibleStats();
+    }
+
+    // 重置输入框但保留当前客户
+    function resetFormInputsKeepCustomer(currentCustomerName) {
+      document.getElementById('qty189').value = '0';
+      document.getElementById('qty10L').value = '0';
+      document.getElementById('qty369Count').value = '0';
+      document.getElementById('returnBarrels').value = '0';
+      document.getElementById('recordNote').value = '';
+      document.getElementById('saveBtnText').textContent = '保存今日送水记录';
+      state.activeEditRecordId = null;
+
+      state.selectedProducts['189'] = false;
+      state.selectedProducts['10L'] = false;
+      state.selectedProducts['369'] = false;
+      updateProductSelectionUI();
+
+      clearSignatureData();
+      calculateBalancePreview();
+
+      document.getElementById('customerSelect').value = currentCustomerName;
+      onCustomerSelectChange();
+    }
+
+    // 渲染今日记录（严格隐私隔离：仅显示选中的客户！）
+    function renderTodayRecords() {
+      const selectedDate = document.getElementById('entryDate').value;
+      const selectedCustomer = document.getElementById('customerSelect').value;
+      const filteredContainer = document.getElementById('filteredTodayRecordsList');
+
+      if (!selectedCustomer) {
+        document.getElementById('todayCustomerListTitle').textContent = '客户今日送水明细';
+        document.getElementById('currentCustomerRecordCount').textContent = '0';
+        filteredContainer.innerHTML = `
+          <div class="bg-white rounded-2xl p-5 text-center border border-slate-100 text-slate-400 text-xs">
+            <i data-lucide="user-check" class="w-6 h-6 mx-auto mb-1 text-slate-300"></i>
+            <p>请在上方选择客户，将仅展示该客户的今日送货记录</p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      const customerTodayRecords = state.records.filter(r => r.date === selectedDate && r.customerName === selectedCustomer);
+
+      document.getElementById('todayCustomerListTitle').textContent = `【${selectedCustomer}】今日送水记录`;
+      document.getElementById('currentCustomerRecordCount').textContent = customerTodayRecords.length;
+
+      if (customerTodayRecords.length === 0) {
+        filteredContainer.innerHTML = `
+          <div class="bg-white rounded-2xl p-4 text-center border border-slate-100 text-slate-400 text-xs">
+            <i data-lucide="clipboard-list" class="w-6 h-6 mx-auto mb-1 text-slate-300"></i>
+            <p>【${selectedCustomer}】今日尚无送水记录</p>
+          </div>
+        `;
+      } else {
+        filteredContainer.innerHTML = '';
+        customerTodayRecords.forEach(r => {
+          filteredContainer.appendChild(createOrderCardElement(r));
+        });
+      }
+
+      lucide.createIcons();
+    }
+
+    function createOrderCardElement(r) {
+      const diff = Number(r.qty189 || 0) - Number(r.returnBarrels || 0);
+      let badgeHtml = '';
+      if (Number(r.qty189 || 0) > 0 || Number(r.returnBarrels || 0) > 0) {
+        if (diff === 0) {
+          badgeHtml = `<span class="px-1.5 py-0.2 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded border border-emerald-200">平桶</span>`;
+        } else if (diff > 0) {
+          badgeHtml = `<span class="px-1.5 py-0.2 bg-amber-50 text-amber-700 text-[10px] font-bold rounded border border-amber-200">欠 ${diff} 桶</span>`;
+        } else {
+          badgeHtml = `<span class="px-1.5 py-0.2 bg-sky-50 text-sky-700 text-[10px] font-bold rounded border border-sky-200">补还 ${Math.abs(diff)} 桶</span>`;
+        }
+      }
+
+      const signBadge = r.signature ? `<span onclick="viewReceipt('${r.id}')" class="px-1.5 py-0.2 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded border border-indigo-200 cursor-pointer flex items-center space-x-0.5 hover:bg-indigo-100"><i data-lucide="pen-tool" class="w-2.5 h-2.5"></i><span>已手写签名</span></span>` : '';
+
+      const prodSummaryList = [];
+      if (Number(r.qty189 || 0) > 0) prodSummaryList.push(`18.9L: ${r.qty189}桶`);
+      if (Number(r.qty10L || 0) > 0) prodSummaryList.push(`10L: ${r.qty10L}桶`);
+      
+      const count369 = Number(r.qty369Count || r.qty369Box || r.qty369Pack || r.qty369 || 0);
+      if (count369 > 0) {
+        const typeStr = (r.qty369Type === 'pack' || r.qty369Pack > 0) ? '塑包' : '纸箱';
+        prodSummaryList.push(`369ml(${typeStr}): ${count369}${typeStr === '塑包' ? '包' : '箱'}`);
+      }
+      if (Number(r.returnBarrels || 0) > 0) prodSummaryList.push(`回空桶: ${r.returnBarrels}个`);
+
+      const card = document.createElement('div');
+      card.className = 'bg-white rounded-2xl p-3 shadow-card border border-slate-100 flex flex-col space-y-2';
+      card.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-1.5">
+            <span class="font-bold text-slate-900 text-xs">${r.customerName}</span>
+            ${badgeHtml}
+            ${signBadge}
+          </div>
+          <div class="flex items-center space-x-1">
+            <button type="button" onclick="viewReceipt('${r.id}')" class="px-2 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-semibold flex items-center space-x-0.5" title="查看动态小票并打印/保存图片">
+              <i data-lucide="receipt" class="w-3.5 h-3.5"></i>
+              <span>小票凭证</span>
+            </button>
+            <button type="button" onclick="editRecord('${r.id}')" class="px-2 py-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg text-xs font-semibold flex items-center space-x-0.5" title="修改本单">
+              <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+              <span>修改</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="bg-slate-50 p-2 rounded-xl text-xs flex flex-wrap gap-1.5 items-center">
+          ${prodSummaryList.length > 0 ? prodSummaryList.map(s => `<span class="px-2 py-0.5 bg-white border border-slate-200 rounded-md font-bold text-slate-700">${s}</span>`).join('') : '<span class="text-slate-400">无送水明细</span>'}
+        </div>
+        ${r.note ? `<p class="text-[10px] text-slate-500 bg-amber-50/50 px-2 py-0.5 rounded border border-amber-100 flex items-center space-x-1"><i data-lucide="message-square" class="w-3 h-3 text-amber-500"></i><span>${r.note}</span></p>` : ''}
+      `;
+      return card;
+    }
+
+    // 动态小票凭证查看
+    function viewReceipt(recordId) {
+      const rec = state.records.find(r => r.id === recordId);
+      if (!rec) return;
+
+      state.currentViewingRecordId = rec.id;
+      document.getElementById('receiptDate').textContent = `送货日期: ${rec.date}`;
+      document.getElementById('receiptDeliveryDate').textContent = rec.date;
+      document.getElementById('receiptCustomer').textContent = rec.customerName;
+
+      const tbody = document.getElementById('receiptItemsTableBody');
+      tbody.innerHTML = '';
+
+      let has189 = false;
+
+      if (Number(rec.qty189 || 0) > 0) {
+        has189 = true;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="py-1.5 font-bold text-slate-800">18.9L 大桶水 (循环桶)</td>
+          <td class="py-1.5 text-right font-black text-sky-700 text-sm">${rec.qty189} 桶</td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      if (Number(rec.qty10L || 0) > 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="py-1.5 font-bold text-slate-800">10L 一次性大桶</td>
+          <td class="py-1.5 text-right font-black text-teal-700 text-sm">${rec.qty10L} 桶</td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      const count369 = Number(rec.qty369Count || rec.qty369Box || rec.qty369Pack || rec.qty369 || 0);
+      if (count369 > 0) {
+        const isPack = (rec.qty369Type === 'pack' || rec.qty369Pack > 0);
+        const pkgTitle = isPack ? '369ml 小瓶水 (塑料封装 · 24瓶/包)' : '369ml 小瓶水 (纸箱装 · 24瓶/箱)';
+        const unitStr = isPack ? '包' : '箱';
+        const colorClass = isPack ? 'text-purple-700' : 'text-indigo-700';
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="py-1.5 font-bold text-slate-800">${pkgTitle}</td>
+          <td class="py-1.5 text-right font-black ${colorClass} text-sm">${count369} ${unitStr}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      if (Number(rec.returnBarrels || 0) > 0 || has189) {
+        const tr = document.createElement('tr');
+        tr.className = 'font-bold bg-emerald-50/70 border-t border-slate-200';
+        tr.innerHTML = `
+          <td class="py-1.5 text-emerald-800">回收 18.9L 空桶数量</td>
+          <td class="py-1.5 text-right text-emerald-700 text-sm">${rec.returnBarrels || 0} 个</td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      const totalDebt = calculateCustomerDebt(rec.customerName);
+      document.getElementById('receiptCustomerTotalDebt').textContent = `${totalDebt} 个`;
+
+      const diff = Number(rec.qty189 || 0) - Number(rec.returnBarrels || 0);
+      const statusEl = document.getElementById('receiptStatus');
+      if (diff === 0) {
+        statusEl.textContent = '本次平桶 (结清)';
+        statusEl.className = 'font-bold text-emerald-700';
+      } else if (diff > 0) {
+        statusEl.textContent = `本次欠空桶 ${diff} 个`;
+        statusEl.className = 'font-bold text-amber-700';
+      } else {
+        statusEl.textContent = `本次补还空桶 ${Math.abs(diff)} 个`;
+        statusEl.className = 'font-bold text-sky-700';
+      }
+
+      const barrelBox = document.getElementById('receiptBarrelStatusBox');
+      if (has189 || Number(rec.returnBarrels || 0) > 0 || totalDebt > 0) {
+        barrelBox.classList.remove('hidden');
+      } else {
+        barrelBox.classList.add('hidden');
+      }
+
+      if (rec.note) {
+        document.getElementById('receiptNote').textContent = rec.note;
+        document.getElementById('receiptNoteBox').classList.remove('hidden');
+      } else {
+        document.getElementById('receiptNoteBox').classList.add('hidden');
+      }
+
+      const imgEl = document.getElementById('receiptSignatureImg');
+      const noSignText = document.getElementById('receiptNoSignText');
+      if (rec.signature) {
+        imgEl.src = rec.signature;
+        imgEl.classList.remove('hidden');
+        noSignText.classList.add('hidden');
+        document.getElementById('receiptSignTime').textContent = '已手写签字确认';
+      } else {
+        imgEl.src = '';
+        imgEl.classList.add('hidden');
+        noSignText.classList.remove('hidden');
+        document.getElementById('receiptSignTime').textContent = '未签字';
+      }
+
+      openModal('receiptModal');
+      lucide.createIcons();
+    }
+
+    function closeReceiptModal() {
+      closeModal('receiptModal');
+    }
+
+    function downloadReceiptAsImage() {
+      const element = document.getElementById('printReceiptArea');
+      showToast('正在生成高清小票图片...');
+
+      html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      }).then(canvas => {
+        const link = document.createElement('a');
+        const cust = document.getElementById('receiptCustomer').textContent;
+        const date = document.getElementById('receiptDeliveryDate').textContent;
+        link.download = `送水签收单_${cust}_${date}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        showToast('小票图片已保存，可直接发微信给客户！');
+      }).catch(err => {
+        console.error(err);
+        showToast('生成图片失败，请截图保存', true);
+      });
+    }
+
+    function printReceipt() {
+      window.print();
+    }
+
+    function editRecord(recordId) {
+      const rec = state.records.find(r => r.id === recordId);
+      if (!rec) return;
+
+      switchTab('tab-entry');
+      state.activeEditRecordId = rec.id;
+      document.getElementById('entryDate').value = rec.date;
+      document.getElementById('customerSelect').value = rec.customerName;
+
+      const has189 = Number(rec.qty189 || 0) > 0;
+      const has10L = Number(rec.qty10L || 0) > 0;
+      const count369 = Number(rec.qty369Count || rec.qty369Box || rec.qty369Pack || rec.qty369 || 0);
+      const has369 = count369 > 0;
+
+      state.selectedProducts['189'] = has189;
+      state.selectedProducts['10L'] = has10L;
+      state.selectedProducts['369'] = has369;
+
+      document.getElementById('qty189').value = rec.qty189 || 0;
+      document.getElementById('qty10L').value = rec.qty10L || 0;
+      document.getElementById('qty369Count').value = count369;
+
+      const isPack = (rec.qty369Type === 'pack' || Number(rec.qty369Pack || 0) > 0);
+      select369PackageType(isPack ? 'pack' : 'box');
+
+      document.getElementById('returnBarrels').value = rec.returnBarrels || 0;
+      document.getElementById('recordNote').value = rec.note || '';
+
+      updateProductSelectionUI();
+
+      if (rec.signature) {
+        state.currentSignatureBase64 = rec.signature;
+        document.getElementById('signPreviewImage').src = rec.signature;
+        document.getElementById('signPlaceholder').classList.add('hidden');
+        document.getElementById('signPreviewContainer').classList.remove('hidden');
+        document.getElementById('signStatusText').textContent = '已签署 ✓';
+        document.getElementById('signStatusText').className = 'text-[10px] text-emerald-600 font-bold';
+      } else {
+        clearSignatureData();
+      }
+
+      document.getElementById('saveBtnText').textContent = '更新修改此单据';
+      calculateBalancePreview();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      showToast('已载入该单据，修改后点击上方保存');
+    }
+
+    // 台账中心（按需触发检索）
+    function setSearchRange(type) {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const todayStr = `${yyyy}-${mm}-${dd}`;
+
+      if (type === 'today') {
+        document.getElementById('searchStartDate').value = todayStr;
+        document.getElementById('searchEndDate').value = todayStr;
+      } else if (type === 'yesterday') {
+        const yDate = new Date(today);
+        yDate.setDate(yDate.getDate() - 1);
+        const yStr = `${yDate.getFullYear()}-${String(yDate.getMonth() + 1).padStart(2, '0')}-${String(yDate.getDate()).padStart(2, '0')}`;
+        document.getElementById('searchStartDate').value = yStr;
+        document.getElementById('searchEndDate').value = yStr;
+      } else if (type === 'thisMonth') {
+        document.getElementById('searchStartDate').value = `${yyyy}-${mm}-01`;
+        document.getElementById('searchEndDate').value = todayStr;
+      } else if (type === 'lastMonth') {
+        const lMonthDate = new Date(yyyy, today.getMonth() - 1, 1);
+        const lMonthEnd = new Date(yyyy, today.getMonth(), 0);
+        document.getElementById('searchStartDate').value = `${lMonthDate.getFullYear()}-${String(lMonthDate.getMonth() + 1).padStart(2, '0')}-01`;
+        document.getElementById('searchEndDate').value = `${lMonthEnd.getFullYear()}-${String(lMonthEnd.getMonth() + 1).padStart(2, '0')}-${String(lMonthEnd.getDate()).padStart(2, '0')}`;
+      } else if (type === 'last30') {
+        const d30 = new Date(today);
+        d30.setDate(d30.getDate() - 30);
+        document.getElementById('searchStartDate').value = `${d30.getFullYear()}-${String(d30.getMonth() + 1).padStart(2, '0')}-${String(d30.getDate()).padStart(2, '0')}`;
+        document.getElementById('searchEndDate').value = todayStr;
+      }
+      executeSearchOrders();
+    }
+
+    function executeSearchOrders() {
+      const sDate = document.getElementById('searchStartDate').value;
+      const eDate = document.getElementById('searchEndDate').value;
+      const customer = document.getElementById('searchCustomerSelect').value;
+      const signStatus = document.getElementById('searchSignStatus').value;
+
+      let results = state.records.filter(r => {
+        if (sDate && r.date < sDate) return false;
+        if (eDate && r.date > eDate) return false;
+        if (customer && r.customerName !== customer) return false;
+        if (signStatus === 'signed' && !r.signature) return false;
+        if (signStatus === 'unsigned' && r.signature) return false;
+        return true;
+      });
+
+      results.sort((a, b) => b.date.localeCompare(a.date) || (b.timestamp || 0) - (a.timestamp || 0));
+
+      document.getElementById('searchResultCount').textContent = results.length;
+      const listContainer = document.getElementById('searchRecordsList');
+
+      if (results.length === 0) {
+        listContainer.innerHTML = `
+          <div class="bg-white rounded-2xl p-5 text-center border border-slate-100 text-slate-400 text-xs">
+            <i data-lucide="inbox" class="w-6 h-6 mx-auto mb-1 text-slate-300"></i>
+            <p>所选条件下暂无送水台账记录</p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      listContainer.innerHTML = '';
+      results.forEach(r => {
+        const card = createOrderCardElement(r);
+        listContainer.appendChild(card);
+      });
+
+      lucide.createIcons();
+    }
+
+    // ==================== 客户与桶账管理 (红绿专区按需切换) ====================
+    function toggleLedgerView(viewType) {
+      if (state.ledgerActiveView === viewType) {
+        state.ledgerActiveView = 'none'; // 点击已展开的卡片则收起
+      } else {
+        state.ledgerActiveView = viewType;
+      }
+      renderCustomerLedger();
+    }
+
+    function renderCustomerLedger() {
+      const searchInput = document.getElementById('ledgerSearchInput');
+      const searchQuery = searchInput ? searchInput.value.trim().toLowerCase() : '';
+      const debtContainer = document.getElementById('debtCustomersList');
+      const cleanContainer = document.getElementById('cleanCustomersList');
+
+      let customerStats = state.customers.map(c => {
+        let total189 = 0;
+        let totalReturn = 0;
+        let lastDate = '';
+        
+        state.records.forEach(r => {
+          if (r.customerName === c.name) {
+            total189 += Number(r.qty189 || 0);
+            totalReturn += Number(r.returnBarrels || 0);
+            if (!lastDate || r.date > lastDate) {
+              lastDate = r.date;
+            }
+          }
+        });
+
+        const debt = Math.max(0, total189 - totalReturn);
+        return {
+          id: c.id,
+          name: c.name,
+          contact: c.contact || '',
+          phone: c.phone || '',
+          address: c.address || '',
+          total189,
+          totalReturn,
+          debt,
+          lastDate: lastDate || '暂无送水'
+        };
+      });
+
+      if (searchQuery) {
+        customerStats = customerStats.filter(c => 
+          c.name.toLowerCase().includes(searchQuery) ||
+          (c.contact && c.contact.toLowerCase().includes(searchQuery)) ||
+          (c.phone && c.phone.includes(searchQuery)) ||
+          (c.address && c.address.toLowerCase().includes(searchQuery))
+        );
+      }
+
+      const debtList = customerStats.filter(c => c.debt > 0).sort((a, b) => b.debt - a.debt);
+      const cleanList = customerStats.filter(c => c.debt === 0);
+
+      const totalAllDebt = debtList.reduce((acc, curr) => acc + curr.debt, 0);
+      
+      const elTotalDebt = document.getElementById('totalOutstandingBarrels');
+      if (elTotalDebt) elTotalDebt.textContent = totalAllDebt;
+      
+      const elDebtBadge = document.getElementById('debtCustomerCountBadge');
+      if (elDebtBadge) elDebtBadge.textContent = `${debtList.length} 家`;
+      
+      const elCleanCount = document.getElementById('cleanCustomerCount');
+      if (elCleanCount) elCleanCount.textContent = cleanList.length;
+      
+      const elCleanBadge = document.getElementById('cleanCustomerCountBadge');
+      if (elCleanBadge) elCleanBadge.textContent = `${cleanList.length} 家`;
+
+      // 切换看板卡片的高亮边框与折叠状态
+      const debtBtn = document.getElementById('cardDebtSummaryBtn');
+      const cleanBtn = document.getElementById('cardCleanSummaryBtn');
+      const debtSec = document.getElementById('debtCustomersSection');
+      const cleanSec = document.getElementById('cleanCustomersSection');
+      const emptyPrompt = document.getElementById('ledgerEmptyPrompt');
+
+      if (state.ledgerActiveView === 'debt') {
+        if (debtBtn) debtBtn.className = 'bg-gradient-to-br from-rose-600 to-red-700 text-white rounded-2xl p-3.5 shadow-card text-left transition active:scale-[0.98] border-2 border-rose-300 ring-2 ring-rose-400/40';
+        if (cleanBtn) cleanBtn.className = 'bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-2xl p-3.5 shadow-card text-left transition active:scale-[0.98] border-2 border-transparent opacity-80';
+        if (debtSec) debtSec.classList.remove('hidden');
+        if (cleanSec) cleanSec.classList.add('hidden');
+        if (emptyPrompt) emptyPrompt.classList.add('hidden');
+        const dtEl = document.getElementById('debtToggleText');
+        if (dtEl) dtEl.textContent = '点击收起欠桶列表 ▲';
+        const ctEl = document.getElementById('cleanToggleText');
+        if (ctEl) ctEl.textContent = '点击查看结清列表 ▼';
+      } else if (state.ledgerActiveView === 'clean') {
+        if (cleanBtn) cleanBtn.className = 'bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-2xl p-3.5 shadow-card text-left transition active:scale-[0.98] border-2 border-emerald-300 ring-2 ring-emerald-400/40';
+        if (debtBtn) debtBtn.className = 'bg-gradient-to-br from-rose-600 to-red-700 text-white rounded-2xl p-3.5 shadow-card text-left transition active:scale-[0.98] border-2 border-transparent opacity-80';
+        if (cleanSec) cleanSec.classList.remove('hidden');
+        if (debtSec) debtSec.classList.add('hidden');
+        if (emptyPrompt) emptyPrompt.classList.add('hidden');
+        const ctEl = document.getElementById('cleanToggleText');
+        if (ctEl) ctEl.textContent = '点击收起结清列表 ▲';
+        const dtEl = document.getElementById('debtToggleText');
+        if (dtEl) dtEl.textContent = '点击查看欠桶列表 ▼';
+      } else {
+        if (debtBtn) debtBtn.className = 'bg-gradient-to-br from-rose-600 to-red-700 text-white rounded-2xl p-3.5 shadow-card text-left transition active:scale-[0.98] border-2 border-transparent';
+        if (cleanBtn) cleanBtn.className = 'bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-2xl p-3.5 shadow-card text-left transition active:scale-[0.98] border-2 border-transparent';
+        if (debtSec) debtSec.classList.add('hidden');
+        if (cleanSec) cleanSec.classList.add('hidden');
+        if (emptyPrompt) emptyPrompt.classList.remove('hidden');
+        const dtEl = document.getElementById('debtToggleText');
+        if (dtEl) dtEl.textContent = '点击查看欠桶列表 ▼';
+        const ctEl = document.getElementById('cleanToggleText');
+        if (ctEl) ctEl.textContent = '点击查看结清列表 ▼';
+      }
+
+      // 渲染红色欠桶列表
+      if (debtContainer) {
+        if (debtList.length === 0) {
+          debtContainer.innerHTML = `
+            <div class="bg-rose-50/50 rounded-2xl p-3.5 text-center border border-rose-100 text-rose-700 text-xs">
+              🎉 太棒了！当前没有任何客户欠空桶，全部桶账已结清！
+            </div>
+          `;
+        } else {
+          debtContainer.innerHTML = '';
+          debtList.forEach(c => {
+            const navUrl = `https://uri.amap.com/navigation?to=${encodeURIComponent(c.address || c.name)}&mode=car&policy=1&coordinate=gaode&callnative=1`;
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-2xl p-3.5 shadow-card border border-rose-200/80 bg-gradient-to-r from-rose-50/30 to-white flex flex-col space-y-2';
+            card.innerHTML = `
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-1.5 truncate mr-1">
+                  <span class="font-bold text-slate-900 text-xs truncate">${c.name}</span>
+                  <span class="px-2 py-0.2 bg-rose-600 text-white text-[10px] font-bold rounded-full shadow-sm animate-pulse flex-shrink-0">欠 ${c.debt} 桶</span>
+                </div>
+                <div class="flex space-x-1 flex-shrink-0">
+                  <button type="button" onclick="openExportForSingleCustomer('${c.name}')" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition">
+                    对账单
+                  </button>
+                  <button type="button" onclick="openQuickDebtModal('${c.name}', ${c.debt})" class="px-2 py-1 bg-emerald-600 text-white hover:bg-emerald-700 font-bold text-xs rounded-lg transition flex items-center space-x-0.5 shadow-sm">
+                    <i data-lucide="corner-down-left" class="w-3.5 h-3.5"></i>
+                    <span>单收空桶</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 负责人与一键呼叫/导航 -->
+              <div class="flex items-center justify-between text-[11px] text-slate-500 bg-white p-2 rounded-xl border border-rose-100">
+                <div class="truncate mr-1">
+                  <span class="text-slate-800 font-bold">${c.contact || '联系人未填'}</span>
+                  <span class="text-slate-400 ml-1.5">${c.phone || ''}</span>
+                </div>
+                <div class="flex space-x-1.5 flex-shrink-0">
+                  ${c.phone ? `<a href="tel:${c.phone}" class="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-bold flex items-center space-x-0.5"><i data-lucide="phone-call" class="w-3 h-3"></i><span>拨打</span></a>` : ''}
+                  ${c.address ? `<a href="${navUrl}" target="_blank" class="px-2 py-0.5 bg-sky-50 text-sky-700 rounded-lg text-[10px] font-bold flex items-center space-x-0.5"><i data-lucide="navigation" class="w-3 h-3"></i><span>高德导航</span></a>` : ''}
+                </div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-1.5 bg-rose-50/50 p-2 rounded-xl text-center text-xs border border-rose-100">
+                <div>
+                  <span class="text-[9px] text-slate-400 block">累计送 18.9L</span>
+                  <span class="font-bold text-slate-700">${c.total189} 桶</span>
+                </div>
+                <div>
+                  <span class="text-[9px] text-slate-400 block">累计收回空桶</span>
+                  <span class="font-bold text-emerald-700">${c.totalReturn} 个</span>
+                </div>
+                <div>
+                  <span class="text-[9px] text-rose-500 block">在押欠桶数</span>
+                  <span class="font-black text-rose-600 text-sm">${c.debt} 个</span>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                <span>最近送水: ${c.lastDate}</span>
+                <button type="button" onclick="quickSelectCustomerForOrder('${c.name}')" class="text-sky-600 hover:text-sky-700 font-bold">
+                  为他记单 &rarr;
+                </button>
+              </div>
+            `;
+            debtContainer.appendChild(card);
+          });
+        }
+      }
+
+      // 渲染绿色结清列表
+      if (cleanContainer) {
+        if (cleanList.length === 0) {
+          cleanContainer.innerHTML = `
+            <div class="bg-emerald-50/50 rounded-2xl p-3.5 text-center border border-emerald-100 text-emerald-700 text-xs">
+              暂无结清客户
+            </div>
+          `;
+        } else {
+          cleanContainer.innerHTML = '';
+          cleanList.forEach(c => {
+            const navUrl = `https://uri.amap.com/navigation?to=${encodeURIComponent(c.address || c.name)}&mode=car&policy=1&coordinate=gaode&callnative=1`;
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-2xl p-3 shadow-card border border-emerald-100 flex flex-col space-y-2';
+            card.innerHTML = `
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-1.5 truncate mr-1">
+                  <span class="font-bold text-slate-800 text-xs truncate">${c.name}</span>
+                  <span class="px-2 py-0.2 bg-emerald-50 text-emerald-700 text-[10px] font-medium rounded-full border border-emerald-200 flex-shrink-0">桶账已结清</span>
+                </div>
+                <div class="flex space-x-1 flex-shrink-0">
+                  <button type="button" onclick="openExportForSingleCustomer('${c.name}')" class="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium text-xs rounded-lg">
+                    对账单
+                  </button>
+                  <button type="button" onclick="quickSelectCustomerForOrder('${c.name}')" class="text-sky-600 hover:text-sky-700 text-xs font-semibold px-2 py-0.5">
+                    去记单
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between text-[11px] text-slate-500 bg-slate-50 p-2 rounded-xl border border-slate-100">
+                <div class="truncate mr-1">
+                  <span class="text-slate-800 font-bold">${c.contact || '联系人未填'}</span>
+                  <span class="text-slate-400 ml-1.5">${c.phone || ''}</span>
+                </div>
+                <div class="flex space-x-1.5 flex-shrink-0">
+                  ${c.phone ? `<a href="tel:${c.phone}" class="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-bold"><i data-lucide="phone-call" class="w-3 h-3"></i></a>` : ''}
+                  ${c.address ? `<a href="${navUrl}" target="_blank" class="px-2 py-0.5 bg-sky-50 text-sky-700 rounded-lg text-[10px] font-bold"><i data-lucide="navigation" class="w-3 h-3"></i></a>` : ''}
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-1 bg-slate-50 p-1.5 rounded-xl text-center text-xs">
+                <div>
+                  <span class="text-[9px] text-slate-400 block">累计送 18.9L</span>
+                  <span class="font-bold text-slate-700">${c.total189} 桶</span>
+                </div>
+                <div>
+                  <span class="text-[9px] text-slate-400 block">累计收回空桶</span>
+                  <span class="font-bold text-emerald-700">${c.totalReturn} 个</span>
+                </div>
+              </div>
+            `;
+            cleanContainer.appendChild(card);
+          });
+        }
+      }
+
+      lucide.createIcons();
+    }
+
+    function quickSelectCustomerForOrder(customerName) {
+      switchTab('tab-entry');
+      document.getElementById('customerSelect').value = customerName;
+      onCustomerSelectChange();
+    }
+
+    function openQuickDebtModal(customerName, currentDebt) {
+      state.currentQuickDebtCustomerId = customerName;
+      document.getElementById('quickDebtCustomerName').textContent = `客户：${customerName} (当前在押欠桶: ${currentDebt} 个)`;
+      document.getElementById('quickDebtQty').value = currentDebt > 0 ? currentDebt : 1;
+      openModal('quickClearDebtModal');
+    }
+
+    function closeQuickDebtModal() {
+      closeModal('quickClearDebtModal');
+    }
+
+    function submitQuickDebtReturn() {
+      const returnQty = parseInt(document.getElementById('quickDebtQty').value || 0, 10);
+      const customerName = state.currentQuickDebtCustomerId;
+      const todayStr = document.getElementById('entryDate').value;
+
+      if (!customerName || returnQty <= 0) {
+        showToast('请输入有效的收回数量！', true);
+        return;
+      }
+
+      const debtRecord = {
+        id: 'rec_return_' + Date.now(),
+        date: todayStr,
+        customerName: customerName,
+        qty189: 0,
+        qty10L: 0,
+        qty369Type: 'box',
+        qty369Count: 0,
+        returnBarrels: returnQty,
+        signature: null,
+        note: '单独回收空桶/清欠账',
+        timestamp: Date.now()
+      };
+
+      state.records.unshift(debtRecord);
+      saveState();
+      closeQuickDebtModal();
+      renderTodayRecords();
+      renderCustomerLedger();
+      renderFlexibleStats();
+      showToast(`已为 ${customerName} 入账回收 ${returnQty} 个空桶！`);
+    }
+
+    // ==================== 客户资料增改 ====================
+    function openAddCustomerModal() {
+      document.getElementById('newCustomerName').value = '';
+      document.getElementById('newCustomerContact').value = '';
+      document.getElementById('newCustomerPhone').value = '';
+      document.getElementById('newCustomerAddress').value = '';
+      document.getElementById('newCustomerInitialDebt').value = '0';
+      openModal('addCustomerModal');
+    }
+
+    function closeAddCustomerModal() {
+      closeModal('addCustomerModal');
+    }
+
+    function submitNewCustomer() {
+      const name = document.getElementById('newCustomerName').value.trim();
+      const contact = document.getElementById('newCustomerContact').value.trim();
+      const phone = document.getElementById('newCustomerPhone').value.trim();
+      const address = document.getElementById('newCustomerAddress').value.trim();
+      const initialDebt = parseInt(document.getElementById('newCustomerInitialDebt').value || 0, 10);
+
+      if (!name) {
+        showToast('请输入客户名称！', true);
+        return;
+      }
+
+      if (state.customers.some(c => c.name === name)) {
+        showToast('该客户名称已存在！', true);
+        return;
+      }
+
+      const newC = {
+        id: 'c_' + Date.now(),
+        name,
+        contact,
+        phone,
+        address
+      };
+
+      state.customers.push(newC);
+
+      if (initialDebt > 0) {
+        state.records.push({
+          id: 'rec_initial_debt_' + Date.now(),
+          date: document.getElementById('entryDate').value,
+          customerName: name,
+          qty189: initialDebt,
+          qty10L: 0,
+          qty369Type: 'box',
+          qty369Count: 0,
+          returnBarrels: 0,
+          signature: null,
+          note: '期初在押欠桶数',
+          timestamp: Date.now()
+        });
+      }
+
+      saveState();
+      renderCustomerSelectors();
+      renderCustomerLedger();
+      closeAddCustomerModal();
+      document.getElementById('customerSelect').value = name;
+      onCustomerSelectChange();
+      showToast(`已成功添加客户: ${name}`);
+    }
+
+    function openEditCustomerModal(customerId) {
+      const cust = state.customers.find(c => c.id === customerId);
+      if (!cust) return;
+
+      document.getElementById('editCustomerId').value = cust.id;
+      document.getElementById('editCustomerName').value = cust.name;
+      document.getElementById('editCustomerContact').value = cust.contact || '';
+      document.getElementById('editCustomerPhone').value = cust.phone || '';
+      document.getElementById('editCustomerAddress').value = cust.address || '';
+      openModal('editCustomerModal');
+    }
+
+    function closeEditCustomerModal() {
+      closeModal('editCustomerModal');
+    }
+
+    function submitEditCustomer() {
+      const id = document.getElementById('editCustomerId').value;
+      const name = document.getElementById('editCustomerName').value.trim();
+      const contact = document.getElementById('editCustomerContact').value.trim();
+      const phone = document.getElementById('editCustomerPhone').value.trim();
+      const address = document.getElementById('editCustomerAddress').value.trim();
+
+      if (!name) {
+        showToast('客户名称不能为空！', true);
+        return;
+      }
+
+      const custIndex = state.customers.findIndex(c => c.id === id);
+      if (custIndex === -1) return;
+
+      const oldName = state.customers[custIndex].name;
+      state.customers[custIndex] = {
+        ...state.customers[custIndex],
+        name,
+        contact,
+        phone,
+        address
+      };
+
+      // 同步更新所有关联的记录中的客户名称
+      if (oldName !== name) {
+        state.records.forEach(r => {
+          if (r.customerName === oldName) r.customerName = name;
+        });
+      }
+
+      saveState();
+      renderCustomerSelectors();
+      renderCustomerLedger();
+      renderTodayRecords();
+      closeEditCustomerModal();
+      showToast(`已更新【${name}】的资料`);
+    }
+
+    // 周期统计
+    function setStatsRange(type) {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const todayStr = `${yyyy}-${mm}-${dd}`;
+
+      if (type === 'today') {
+        document.getElementById('statsStartDate').value = todayStr;
+        document.getElementById('statsEndDate').value = todayStr;
+      } else if (type === 'thisWeek') {
+        const d = new Date(today);
+        const day = d.getDay() || 7;
+        d.setDate(d.getDate() - day + 1);
+        document.getElementById('statsStartDate').value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        document.getElementById('statsEndDate').value = todayStr;
+      } else if (type === 'thisMonth') {
+        document.getElementById('statsStartDate').value = `${yyyy}-${mm}-01`;
+        document.getElementById('statsEndDate').value = todayStr;
+      } else if (type === 'lastMonth') {
+        const lMonthDate = new Date(yyyy, today.getMonth() - 1, 1);
+        const lMonthEnd = new Date(yyyy, today.getMonth(), 0);
+        document.getElementById('statsStartDate').value = `${lMonthDate.getFullYear()}-${String(lMonthDate.getMonth() + 1).padStart(2, '0')}-01`;
+        document.getElementById('statsEndDate').value = `${lMonthEnd.getFullYear()}-${String(lMonthEnd.getMonth() + 1).padStart(2, '0')}-${String(lMonthEnd.getDate()).padStart(2, '0')}`;
+      } else if (type === 'last30') {
+        const d30 = new Date(today);
+        d30.setDate(d30.getDate() - 30);
+        document.getElementById('statsStartDate').value = `${d30.getFullYear()}-${String(d30.getMonth() + 1).padStart(2, '0')}-${String(d30.getDate()).padStart(2, '0')}`;
+        document.getElementById('statsEndDate').value = todayStr;
+      }
+      renderFlexibleStats();
+    }
+
+    function renderFlexibleStats() {
+      const sDate = document.getElementById('statsStartDate').value;
+      const eDate = document.getElementById('statsEndDate').value;
+
+      const periodRecords = state.records.filter(r => {
+        if (sDate && r.date < sDate) return false;
+        if (eDate && r.date > eDate) return false;
+        return true;
+      });
+
+      let sum189 = 0, sum10L = 0, sum369Box = 0, sum369Pack = 0, sumReturn = 0;
+      const customerMap = {};
+
+      state.customers.forEach(c => {
+        customerMap[c.name] = { name: c.name, qty189: 0, qty10L: 0, qty369Box: 0, qty369Pack: 0, returnBarrels: 0 };
+      });
+
+      periodRecords.forEach(r => {
+        sum189 += Number(r.qty189 || 0);
+        sum10L += Number(r.qty10L || 0);
+
+        const count369 = Number(r.qty369Count || r.qty369Box || r.qty369Pack || r.qty369 || 0);
+        const isPack = (r.qty369Type === 'pack' || Number(r.qty369Pack || 0) > 0);
+        if (isPack) {
+          sum369Pack += count369;
+        } else {
+          sum369Box += count369;
+        }
+
+        sumReturn += Number(r.returnBarrels || 0);
+
+        if (!customerMap[r.customerName]) {
+          customerMap[r.customerName] = { name: r.customerName, qty189: 0, qty10L: 0, qty369Box: 0, qty369Pack: 0, returnBarrels: 0 };
+        }
+        customerMap[r.customerName].qty189 += Number(r.qty189 || 0);
+        customerMap[r.customerName].qty10L += Number(r.qty10L || 0);
+        if (isPack) {
+          customerMap[r.customerName].qty369Pack += count369;
+        } else {
+          customerMap[r.customerName].qty369Box += count369;
+        }
+        customerMap[r.customerName].returnBarrels += Number(r.returnBarrels || 0);
+      });
+
+      document.getElementById('statsSum189').textContent = sum189;
+      document.getElementById('statsSum10L').textContent = sum10L;
+      document.getElementById('statsSum369Box').textContent = sum369Box;
+      document.getElementById('statsSum369Pack').textContent = sum369Pack;
+      document.getElementById('statsSumReturn').textContent = sumReturn;
+
+      const tbody = document.getElementById('flexibleCustomerTableBody');
+      tbody.innerHTML = '';
+
+      Object.values(customerMap).forEach(c => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-50 cursor-pointer';
+        tr.onclick = () => openExportForSingleCustomer(c.name);
+        tr.innerHTML = `
+          <td class="py-2 font-bold text-slate-800 flex items-center justify-between">
+            <span>${c.name}</span>
+            <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300"></i>
+          </td>
+          <td class="py-2 text-right font-semibold text-sky-700">${c.qty189}</td>
+          <td class="py-2 text-right font-semibold text-teal-700">${c.qty10L}</td>
+          <td class="py-2 text-right font-semibold text-indigo-700">${c.qty369Box}</td>
+          <td class="py-2 text-right font-semibold text-purple-700">${c.qty369Pack}</td>
+          <td class="py-2 text-right font-semibold text-emerald-700">${c.returnBarrels}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      lucide.createIcons();
+    }
+
+    // 导出 Excel
+    function openExportModal() {
+      document.getElementById('exportStartDate').value = document.getElementById('statsStartDate').value || '2026-08-01';
+      document.getElementById('exportEndDate').value = document.getElementById('statsEndDate').value || '2026-08-30';
+      populateExportCustomerCheckboxes();
+      openModal('exportModal');
+      lucide.createIcons();
+    }
+
+    function closeExportModal() {
+      closeModal('exportModal');
+    }
+
+    function openExportForSingleCustomer(customerName) {
+      openExportModal();
+      selectAllExportCustomers(false);
+      const cb = document.querySelector(`.export-customer-cb[value="${customerName}"]`);
+      if (cb) cb.checked = true;
+      updateSelectedCustomerCount();
+    }
+
+    function populateExportCustomerCheckboxes() {
+      const container = document.getElementById('exportCustomerCheckboxes');
+      container.innerHTML = '';
+      document.getElementById('totalCustomerCount').textContent = state.customers.length;
+
+      state.customers.forEach(c => {
+        const label = document.createElement('label');
+        label.className = 'flex items-center space-x-1.5 bg-white p-2 rounded-lg border border-slate-200/70 text-xs cursor-pointer hover:bg-slate-100 transition select-none export-customer-item';
+        label.dataset.name = c.name.toLowerCase();
+        label.innerHTML = `
+          <input type="checkbox" value="${c.name}" checked onchange="updateSelectedCustomerCount()" class="export-customer-cb w-3.5 h-3.5 text-sky-600 rounded border-slate-300">
+          <span class="font-medium text-slate-800 truncate text-[11px]">${c.name}</span>
+        `;
+        container.appendChild(label);
+      });
+
+      updateSelectedCustomerCount();
+    }
+
+    function filterExportCustomerList() {
+      const q = document.getElementById('exportCustomerSearch').value.trim().toLowerCase();
+      const items = document.querySelectorAll('.export-customer-item');
+      items.forEach(item => {
+        if (!q || item.dataset.name.includes(q)) {
+          item.classList.remove('hidden');
+        } else {
+          item.classList.add('hidden');
+        }
+      });
+    }
+
+    function selectAllExportCustomers(checked) {
+      document.querySelectorAll('.export-customer-cb').forEach(cb => {
+        cb.checked = checked;
+      });
+      updateSelectedCustomerCount();
+    }
+
+    function selectDebtOnlyCustomers() {
+      document.querySelectorAll('.export-customer-cb').forEach(cb => {
+        const name = cb.value;
+        const debt = calculateCustomerDebt(name);
+        cb.checked = debt > 0;
+      });
+      updateSelectedCustomerCount();
+    }
+
+    function updateSelectedCustomerCount() {
+      const cbs = document.querySelectorAll('.export-customer-cb:checked');
+      document.getElementById('selectedCustomerCount').textContent = cbs.length;
+    }
+
+    function getSelectedCustomerNames() {
+      const cbs = document.querySelectorAll('.export-customer-cb:checked');
+      return Array.from(cbs).map(cb => cb.value);
+    }
+
+    function executeExportSelected() {
+      const selectedNames = getSelectedCustomerNames();
+      if (selectedNames.length === 0) {
+        showToast('请至少勾选一位客户进行导出！', true);
+        return;
+      }
+
+      const sDate = document.getElementById('exportStartDate').value;
+      const eDate = document.getElementById('exportEndDate').value;
+      if (!sDate || !eDate) {
+        showToast('请选择有效的起止日期！', true);
+        return;
+      }
+
+      const exportMode = document.querySelector('input[name="exportMode"]:checked').value;
+      const wb = XLSX.utils.book_new();
+
+      if (exportMode === 'statement') {
+        selectedNames.forEach(customerName => {
+          const recs = state.records.filter(r => r.customerName === customerName && r.date >= sDate && r.date <= eDate);
+          recs.sort((a, b) => a.date.localeCompare(b.date));
+
+          let sum189 = 0, sum10L = 0, sum369Box = 0, sum369Pack = 0, sumReturn = 0;
+          recs.forEach(r => {
+            sum189 += Number(r.qty189 || 0);
+            sum10L += Number(r.qty10L || 0);
+            const count369 = Number(r.qty369Count || r.qty369Box || r.qty369Pack || r.qty369 || 0);
+            const isPack = (r.qty369Type === 'pack' || Number(r.qty369Pack || 0) > 0);
+            if (isPack) sum369Pack += count369;
+            else sum369Box += count369;
+            sumReturn += Number(r.returnBarrels || 0);
+          });
+          const currDebt = calculateCustomerDebt(customerName);
+
+          const sheetAoa = [
+            [`【${customerName}】送水及空桶对账确认单`],
+            [`对账周期：${sDate} 至 ${eDate}`, '', '', '', `导出时间：${new Date().toLocaleDateString('zh-CN')}`],
+            [`期间送 18.9L：${sum189} 桶`, `期间送 10L：${sum10L} 桶`, `送 369ml纸箱：${sum369Box} 箱`, `送 369ml塑包：${sum369Pack} 包`, `期间回收空桶：${sumReturn} 个`, `当前在押欠桶：${currDebt} 个`],
+            [],
+            ['序号', '送货日期', '18.9L大桶(送)', '10L一次性(送)', '369ml纸箱(送)', '369ml塑包(送)', '回收18.9L空桶', '当次空桶差额', '负责人签字状态', '备注']
+          ];
+
+          if (recs.length === 0) {
+            sheetAoa.push(['-', '所选周期内无送水记录', 0, 0, 0, 0, 0, '平', '无', '']);
+          } else {
+            recs.forEach((r, idx) => {
+              const diff = Number(r.qty189 || 0) - Number(r.returnBarrels || 0);
+              let diffStr = '平桶';
+              if (diff > 0) diffStr = `欠 ${diff} 桶`;
+              else if (diff < 0) diffStr = `补还 ${Math.abs(diff)} 桶`;
+
+              const count369 = Number(r.qty369Count || r.qty369Box || r.qty369Pack || r.qty369 || 0);
+              const isPack = (r.qty369Type === 'pack' || Number(r.qty369Pack || 0) > 0);
+
+              sheetAoa.push([
+                idx + 1,
+                r.date,
+                r.qty189 || 0,
+                r.qty10L || 0,
+                isPack ? 0 : count369,
+                isPack ? count369 : 0,
+                r.returnBarrels || 0,
+                diffStr,
+                r.signature ? '已手写签字确认' : '未签字',
+                r.note || ''
+              ]);
+            });
+          }
+
+          sheetAoa.push([]);
+          sheetAoa.push(['合计汇总', '', sum189, sum10L, sum369Box, sum369Pack, sumReturn, `净欠/还: ${sum189 - sumReturn}`, '', '']);
+          sheetAoa.push([]);
+          sheetAoa.push(['客户确认签字/盖章：___________________', '', '', '', '送水方经手人：___________________']);
+
+          const ws = XLSX.utils.aoa_to_sheet(sheetAoa);
+          ws['!cols'] = [
+            { wch: 8 },
+            { wch: 14 },
+            { wch: 14 },
+            { wch: 14 },
+            { wch: 14 },
+            { wch: 14 },
+            { wch: 15 },
+            { wch: 14 },
+            { wch: 18 },
+            { wch: 22 },
+          ];
+
+          const safeSheetName = customerName.replace(/[:\\\\/?*\\[\\]]/g, '').slice(0, 28);
+          XLSX.utils.book_append_sheet(wb, ws, safeSheetName || `对账单`);
+        });
+
+      } else {
+        const startDateObj = new Date(sDate);
+        const endDateObj = new Date(eDate);
+        const dayList = [];
+        let curr = new Date(startDateObj);
+        while (curr <= endDateObj) {
+          const y = curr.getFullYear();
+          const m = String(curr.getMonth() + 1).padStart(2, '0');
+          const d = String(curr.getDate()).padStart(2, '0');
+          dayList.push(`${y}-${m}-${d}`);
+          curr.setDate(curr.getDate() + 1);
+        }
+
+        const headerRow1 = ['客户名称'];
+        const headerRow2 = [''];
+
+        dayList.forEach(dayStr => {
+          headerRow1.push(dayStr, '', '', '', '');
+          headerRow2.push('18.9L大桶', '10L大桶', '369ml纸箱', '369ml塑包', '回空桶数量');
+        });
+
+        const dataRows = [];
+        const colTotals = new Array(dayList.length * 5).fill(0);
+
+        selectedNames.forEach(customerName => {
+          const row = [customerName];
+          dayList.forEach((dateStr, dIdx) => {
+            const recs = state.records.filter(r => r.customerName === customerName && r.date === dateStr);
+            
+            let q189 = 0, q10 = 0, q369B = 0, q369P = 0, ret = 0;
+            recs.forEach(r => {
+              q189 += Number(r.qty189 || 0);
+              q10 += Number(r.qty10L || 0);
+              const count369 = Number(r.qty369Count || r.qty369Box || r.qty369Pack || r.qty369 || 0);
+              const isPack = (r.qty369Type === 'pack' || Number(r.qty369Pack || 0) > 0);
+              if (isPack) q369P += count369;
+              else q369B += count369;
+              ret += Number(r.returnBarrels || 0);
+            });
+
+            const baseIdx = dIdx * 5;
+            colTotals[baseIdx] += q189;
+            colTotals[baseIdx + 1] += q10;
+            colTotals[baseIdx + 2] += q369B;
+            colTotals[baseIdx + 3] += q369P;
+            colTotals[baseIdx + 4] += ret;
+
+            row.push(
+              q189 > 0 ? q189 : '',
+              q10 > 0 ? q10 : '',
+              q369B > 0 ? q369B : '',
+              q369P > 0 ? q369P : '',
+              ret > 0 ? ret : ''
+            );
+          });
+          dataRows.push(row);
+        });
+
+        const totalRow = ['总计', ...colTotals];
+        const sheetData = [headerRow1, headerRow2, ...dataRows, [], totalRow];
+
+        const ws = XLSX.utils.aoa_to_sheet(sheetData);
+        ws['!cols'] = [{ wch: 18 }, ...new Array(dayList.length * 5).fill({ wch: 10 })];
+        XLSX.utils.book_append_sheet(wb, ws, `送水统计表`);
+      }
+
+      const fileName = selectedNames.length === 1 
+        ? `${selectedNames[0]}_(${sDate}至${eDate})_送水对账单.xlsx`
+        : `送水及空桶对账报表_(${sDate}至${eDate})_(${selectedNames.length}家客户).xlsx`;
+
+      XLSX.writeFile(wb, fileName);
+      closeExportModal();
+      showToast(`已成功导出 ${fileName}！`);
+    }
+
+    // 备份与还原
+    function exportBackupJSON() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state, null, 2));
+      const a = document.createElement('a');
+      a.href = dataStr;
+      a.download = `送水统计数据备份_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      showToast('已导出完整JSON数据备份！');
+    }
+
+    function importBackupJSON(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (imported && Array.isArray(imported.customers) && Array.isArray(imported.records)) {
+            state = imported;
+            saveState();
+            renderCustomerSelectors();
+            renderTodayRecords();
+            renderCustomerLedger();
+            renderFlexibleStats();
+            showToast('数据恢复成功！');
+          } else {
+            showToast('文件格式不正确，导入失败', true);
+          }
+        } catch (err) {
+          showToast('JSON解析错误', true);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function resetToDefaultData() {
+      if (confirm('确定要恢复为初始示例数据吗？当前新增的记录将被覆盖。')) {
+        state.customers = DEFAULT_CUSTOMERS;
+        seedInitialSampleData();
+        saveState();
+        renderCustomerSelectors();
+        renderTodayRecords();
+        renderCustomerLedger();
+        renderFlexibleStats();
+        showToast('已恢复为初始数据');
+      }
+    }
+
+    // 4个 Tab 页面切换
+    function switchTab(tabId) {
+      const tabs = ['tab-entry', 'tab-search', 'tab-stats', 'tab-customer-ledger'];
+      tabs.forEach(t => {
+        const el = document.getElementById(t);
+        const navEl = document.getElementById('nav-' + t);
+        if (t === tabId) {
+          el.classList.remove('hidden');
+          navEl.className = 'py-1 flex flex-col items-center justify-center text-sky-600 transition';
+          navEl.querySelector('span').className = 'text-[11px] font-bold';
+        } else {
+          el.classList.add('hidden');
+          navEl.className = 'py-1 flex flex-col items-center justify-center text-slate-400 hover:text-slate-600 transition';
+          navEl.querySelector('span').className = 'text-[11px] font-medium';
+        }
+      });
+
+      if (tabId === 'tab-entry') renderTodayRecords();
+      if (tabId === 'tab-customer-ledger') renderCustomerLedger();
+      if (tabId === 'tab-stats') renderFlexibleStats();
+      lucide.createIcons();
+    }
+
+    // Toast 提示函数（绝对内联样式，2秒后绝对自动淡出）
+    function showToast(msg, isError = false) {
+      const toast = document.getElementById('toast');
+      const toastText = document.getElementById('toastMessage');
+      if (!toast || !toastText) return;
+
+      toastText.textContent = msg;
+      toast.style.backgroundColor = isError ? 'rgba(220, 38, 38, 0.95)' : 'rgba(15, 23, 42, 0.95)';
+      toast.style.display = 'flex';
+      
+      void toast.offsetWidth; // 触发回流重绘
+      
+      toast.style.opacity = '1';
+      toast.style.pointerEvents = 'auto';
+
+      if (toastTimer) {
+        clearTimeout(toastTimer);
+      }
+
+      toastTimer = setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.pointerEvents = 'none';
+        setTimeout(() => {
+          toast.style.display = 'none';
+        }, 300);
+      }, 2000);
+    }
+  </script>
+</body>
+</html>
